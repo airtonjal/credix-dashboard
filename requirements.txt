@@ -1,0 +1,7 @@
+streamlit>=1.32.0
+google-cloud-bigquery>=3.17.2
+pandas>=2.2.1
+plotly>=5.19.0
+numpy>=1.26.4
+python-dotenv>=1.0.1
+geopandas>=0.14.3 
