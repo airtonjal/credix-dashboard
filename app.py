@@ -54,7 +54,12 @@ def load_portfolio_risk():
 def load_payment_performance():
     credentials = get_credentials()
     query = """
-    WITH daily_stats AS (
+    WITH dates AS (
+        SELECT DISTINCT DATE(snapshot_date) as date
+        FROM `gold.fact_payment_performance`
+        ORDER BY date
+    ),
+    daily_stats AS (
         SELECT 
             DATE(snapshot_date) as date,
             payment_status,
@@ -62,16 +67,16 @@ def load_payment_performance():
             SUM(total_original_amount) as total_amount
         FROM `gold.fact_payment_performance`
         GROUP BY DATE(snapshot_date), payment_status
-        ORDER BY date
     )
     SELECT 
-        date,
-        payment_status,
-        count,
-        total_amount,
-        ROUND(total_amount / SUM(total_amount) OVER (PARTITION BY date) * 100, 2) as percentage
-    FROM daily_stats
-    ORDER BY date, payment_status
+        d.date,
+        COALESCE(ds.payment_status, 'NO_DATA') as payment_status,
+        COALESCE(ds.count, 0) as count,
+        COALESCE(ds.total_amount, 0) as total_amount,
+        COALESCE(ROUND(ds.total_amount / NULLIF(SUM(ds.total_amount) OVER (PARTITION BY d.date), 0) * 100, 2), 0) as percentage
+    FROM dates d
+    LEFT JOIN daily_stats ds ON d.date = ds.date
+    ORDER BY d.date, ds.payment_status
     """
     return pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
 
