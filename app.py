@@ -406,11 +406,9 @@ try:
                 xaxis=dict(
                     type='category',
                     tickangle=-45,
-                    # Show approximately 10 ticks
                     nticks=10,
-                    # Show first and last date
-                    showfirstlabel=True,
-                    showlastlabel=True
+                    tickmode='auto',
+                    showticklabels=True
                 )
             )
             st.plotly_chart(fig_count, use_container_width=True)
@@ -437,11 +435,9 @@ try:
                 xaxis=dict(
                     type='category',
                     tickangle=-45,
-                    # Show approximately 10 ticks
                     nticks=10,
-                    # Show first and last date
-                    showfirstlabel=True,
-                    showlastlabel=True
+                    tickmode='auto',
+                    showticklabels=True
                 )
             )
             st.plotly_chart(fig_amount, use_container_width=True)
