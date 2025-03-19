@@ -444,7 +444,7 @@ try:
             SELECT 
                 cohort_date,
                 days_since_origination,
-                ROUND(total_paid / NULLIF(total_expected, 0) * 100, 2) as completion_rate,
+                100 - ROUND(total_paid / NULLIF(total_expected, 0) * 100, 2) as default_rate,
                 ROUND(completed_loans / NULLIF(total_loans, 0) * 100, 2) as loans_completed_pct,
                 total_loans
             FROM daily_progression
@@ -456,44 +456,59 @@ try:
 
         df_cohort = load_cohort_data()
         
-        # Format dates for better display
-        df_cohort['cohort_date'] = pd.to_datetime(df_cohort['cohort_date']).dt.strftime('%Y-%m-%d')
+        # Format dates for better display and calculate cohort age
+        df_cohort['cohort_date'] = pd.to_datetime(df_cohort['cohort_date'])
+        df_cohort['cohort_age'] = (pd.Timestamp.now() - df_cohort['cohort_date']).dt.days
+        df_cohort['cohort_date_str'] = df_cohort['cohort_date'].dt.strftime('%Y-%m-%d')
+        
+        # Calculate opacity based on cohort age (newer cohorts are more opaque)
+        max_age = df_cohort['cohort_age'].max()
+        df_cohort['opacity'] = 1 - (df_cohort['cohort_age'] / max_age * 0.7)  # Keep minimum opacity at 0.3
         
         # Create line plot
-        fig_survival = px.line(
-            df_cohort,
-            x='days_since_origination',
-            y='completion_rate',
-            color='cohort_date',
-            title="Payment Completion Rate by Cohort",
-            labels={
-                'days_since_origination': 'Days Since Origination',
-                'completion_rate': 'Completion Rate (%)',
-                'cohort_date': 'Cohort'
-            }
-        )
+        fig_survival = go.Figure()
+        
+        # Add traces for each cohort
+        for cohort in df_cohort['cohort_date_str'].unique():
+            cohort_data = df_cohort[df_cohort['cohort_date_str'] == cohort]
+            opacity = cohort_data['opacity'].iloc[0]
+            
+            fig_survival.add_trace(
+                go.Scatter(
+                    x=cohort_data['days_since_origination'],
+                    y=cohort_data['default_rate'],
+                    name=cohort,
+                    line=dict(
+                        width=2,
+                        color='rgba(103, 58, 183, {})'.format(opacity)  # Purple color with varying opacity
+                    ),
+                    hovertemplate='Default Rate: %{y:.1f}%<br>Days: %{x}<extra></extra>'
+                )
+            )
         
         # Update layout to match Nubank's style
         fig_survival.update_layout(
+            title="Portfolio Default Rate by Cohort",
             xaxis_title="Days Since Origination",
-            yaxis_title="Completion Rate (%)",
+            yaxis_title="Default Rate (%)",
             plot_bgcolor='white',
+            paper_bgcolor='white',
             yaxis=dict(
                 range=[0, 100],
-                gridcolor='lightgrey',
+                gridcolor='rgba(0,0,0,0.1)',
                 gridwidth=0.5,
                 tickformat='.0f',
                 zeroline=True,
-                zerolinecolor='lightgrey'
+                zerolinecolor='rgba(0,0,0,0.1)'
             ),
             xaxis=dict(
-                gridcolor='lightgrey',
+                gridcolor='rgba(0,0,0,0.1)',
                 gridwidth=0.5,
                 tickmode='linear',
                 dtick=30,  # Show ticks every 30 days
                 tickangle=0,
                 zeroline=True,
-                zerolinecolor='lightgrey'
+                zerolinecolor='rgba(0,0,0,0.1)'
             ),
             legend=dict(
                 yanchor="top",
@@ -502,14 +517,8 @@ try:
                 x=0,
                 orientation="h"
             ),
-            hovermode='x unified'
-        )
-        
-        # Update line properties
-        fig_survival.update_traces(
-            line=dict(width=1.5),
-            opacity=0.7,
-            hovertemplate='Completion Rate: %{y:.1f}%<br>Days: %{x}<extra></extra>'
+            hovermode='x unified',
+            margin=dict(t=50, b=100)  # Adjust margins to accommodate the legend
         )
         
         st.plotly_chart(fig_survival, use_container_width=True)
@@ -519,9 +528,10 @@ try:
         **How to read this chart:**
         - Each line represents a cohort of loans originated on a specific date
         - The x-axis shows how many days have passed since the cohort's origination
-        - The y-axis shows what percentage of the expected amount has been paid
-        - Steeper lines indicate faster repayment rates
-        - Flatter lines suggest slower repayment progression
+        - The y-axis shows the default rate (percentage of expected amount not yet paid)
+        - Steeper downward lines indicate better repayment performance
+        - Flatter or upward lines suggest repayment challenges
+        - Darker lines represent newer cohorts, lighter lines are older cohorts
         """)
 
 except Exception as e:
