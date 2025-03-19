@@ -77,12 +77,20 @@ def load_portfolio_risk():
 def load_payment_performance():
     credentials = get_credentials()
     query = """
-    WITH dates AS (
-        SELECT DISTINCT DATE(last_due_date) as date
+    WITH latest_snapshot AS (
+        SELECT MAX(snapshot_date) as latest_date
         FROM `gold.fact_payment_performance`
-        ORDER BY date
     ),
-    daily_stats AS (
+    current_status AS (
+        SELECT 
+            payment_status,
+            COUNT(*) as count,
+            SUM(total_original_amount) as total_amount
+        FROM `gold.fact_payment_performance`
+        WHERE snapshot_date = (SELECT latest_date FROM latest_snapshot)
+        GROUP BY payment_status
+    ),
+    historical_stats AS (
         SELECT 
             DATE(last_due_date) as date,
             payment_status,
@@ -92,14 +100,23 @@ def load_payment_performance():
         GROUP BY DATE(last_due_date), payment_status
     )
     SELECT 
-        d.date,
-        COALESCE(ds.payment_status, 'NO_DATA') as payment_status,
-        COALESCE(ds.count, 0) as count,
-        COALESCE(ds.total_amount, 0) as total_amount,
-        COALESCE(ROUND(ds.total_amount / NULLIF(SUM(ds.total_amount) OVER (PARTITION BY d.date), 0) * 100, 2), 0) as percentage
-    FROM dates d
-    LEFT JOIN daily_stats ds ON d.date = ds.date
-    ORDER BY d.date, ds.payment_status
+        'CURRENT' as date,
+        payment_status,
+        count,
+        total_amount,
+        ROUND(total_amount / SUM(total_amount) OVER () * 100, 2) as percentage
+    FROM current_status
+    
+    UNION ALL
+    
+    SELECT 
+        CAST(date AS STRING),
+        payment_status,
+        count,
+        total_amount,
+        ROUND(total_amount / SUM(total_amount) OVER (PARTITION BY date) * 100, 2) as percentage
+    FROM historical_stats
+    ORDER BY date = 'CURRENT' DESC, date, payment_status
     """
     return pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
 
@@ -143,7 +160,13 @@ try:
         fig_status = px.pie(
             values=status_dist.values,
             names=status_dist.index,
-            title="Distribution of Loan Payment Status"
+            title="Distribution of Loan Payment Status",
+            color=status_dist.index,
+            color_discrete_map={
+                'FULLY_PAID_ON_TIME': '#2ecc71',     # Green
+                'FULLY_PAID_WITH_DELAYS': '#e74c3c',  # Red
+                'HAS_OVERDUE': '#f1c40f'             # Yellow
+            }
         )
         st.plotly_chart(fig_status, use_container_width=True)
 
@@ -203,8 +226,8 @@ try:
         # Load data
         df_risk = load_portfolio_risk()
         
-        # Convert date to datetime for proper plotting
-        df_risk['date'] = pd.to_datetime(df_risk['date'])
+        # Convert date to datetime and format it
+        df_risk['date'] = pd.to_datetime(df_risk['date']).dt.strftime('%Y-%m-%d')
         
         # Risk Metrics Over Time
         st.subheader("Risk Metrics Trend")
@@ -235,7 +258,8 @@ try:
                 yaxis_tickformat='.2%',  # Format y-axis as percentage
                 xaxis=dict(
                     type='category',  # Force categorical x-axis
-                    tickformat='%Y-%m-%d'  # Format dates as YYYY-MM-DD
+                    tickangle=-45,  # Angle the dates for better readability
+                    dtick=1  # Show all dates
                 )
             )
             st.plotly_chart(fig_default, use_container_width=True)
@@ -261,7 +285,8 @@ try:
                 hovermode='x unified',
                 xaxis=dict(
                     type='category',  # Force categorical x-axis
-                    tickformat='%Y-%m-%d'  # Format dates as YYYY-MM-DD
+                    tickangle=-45,  # Angle the dates for better readability
+                    dtick=1  # Show all dates
                 )
             )
             st.plotly_chart(fig_late, use_container_width=True)
@@ -304,7 +329,8 @@ try:
             yaxis_ticksuffix='%',
             xaxis=dict(
                 type='category',  # Force categorical x-axis
-                tickformat='%Y-%m-%d'  # Format dates as YYYY-MM-DD
+                tickangle=-45,  # Angle the dates for better readability
+                dtick=1  # Show all dates
             )
         )
         st.plotly_chart(fig_composition, use_container_width=True)
@@ -346,8 +372,10 @@ try:
         # Load data
         df_payment = load_payment_performance()
         
-        # Convert date column to datetime and format it
-        df_payment['date'] = pd.to_datetime(df_payment['date']).dt.strftime('%Y-%m-%d')
+        # Split current status and historical data
+        current_status = df_payment[df_payment['date'] == 'CURRENT']
+        historical_data = df_payment[df_payment['date'] != 'CURRENT'].copy()
+        historical_data['date'] = pd.to_datetime(historical_data['date']).dt.strftime('%Y-%m-%d')
         
         # Payment Status Timeline
         st.subheader("Payment Status Over Time")
@@ -358,19 +386,25 @@ try:
         with col1:
             st.subheader("Number of Loans by Status")
             fig_count = px.area(
-                df_payment,
+                historical_data,
                 x='date',
                 y='count',
                 color='payment_status',
-                title="Number of Loans by Payment Status Over Time"
+                title="Number of Loans by Payment Status Over Time",
+                color_discrete_map={
+                    'FULLY_PAID_ON_TIME': '#2ecc71',     # Green
+                    'FULLY_PAID_WITH_DELAYS': '#e74c3c',  # Red
+                    'HAS_OVERDUE': '#f1c40f'             # Yellow
+                }
             )
             fig_count.update_layout(
                 xaxis_title="Date",
                 yaxis_title="Number of Loans",
                 hovermode='x unified',
                 xaxis=dict(
-                    type='category',  # Force categorical x-axis
-                    tickformat='%Y-%m-%d'  # Format dates as YYYY-MM-DD
+                    type='category',
+                    tickangle=-45,
+                    dtick=1
                 )
             )
             st.plotly_chart(fig_count, use_container_width=True)
@@ -378,37 +412,41 @@ try:
         with col2:
             st.subheader("Portfolio Value by Status (%)")
             fig_amount = px.area(
-                df_payment,
+                historical_data,
                 x='date',
                 y='percentage',
                 color='payment_status',
-                title="Portfolio Value Distribution by Payment Status (%)"
+                title="Portfolio Value Distribution by Payment Status (%)",
+                color_discrete_map={
+                    'FULLY_PAID_ON_TIME': '#2ecc71',     # Green
+                    'FULLY_PAID_WITH_DELAYS': '#e74c3c',  # Red
+                    'HAS_OVERDUE': '#f1c40f'             # Yellow
+                }
             )
             fig_amount.update_layout(
                 xaxis_title="Date",
                 yaxis_title="Percentage of Portfolio Value (%)",
                 hovermode='x unified',
-                yaxis_range=[0, 100],  # Force y-axis to show full percentage range
+                yaxis_range=[0, 100],
                 xaxis=dict(
-                    type='category',  # Force categorical x-axis
-                    tickformat='%Y-%m-%d'  # Format dates as YYYY-MM-DD
+                    type='category',
+                    tickangle=-45,
+                    dtick=1
                 )
             )
             st.plotly_chart(fig_amount, use_container_width=True)
         
-        # Add metrics for the latest date
-        st.subheader("Latest Payment Status Metrics")
-        latest_date = df_payment['date'].max()
-        latest_data = df_payment[df_payment['date'] == latest_date]
+        # Add metrics for the current status
+        st.subheader("Current Payment Status")
         
         # Create metrics
-        cols = st.columns(len(latest_data))
-        for i, (status, data) in enumerate(latest_data.groupby('payment_status')):
+        cols = st.columns(len(current_status))
+        for i, (_, data) in enumerate(current_status.iterrows()):
             with cols[i]:
                 st.metric(
-                    f"{status}",
-                    f"{data['count'].iloc[0]:,} loans",
-                    f"{data['percentage'].iloc[0]:.1f}% of portfolio"
+                    f"{data['payment_status']}",
+                    f"{data['count']:,} loans",
+                    f"{data['percentage']:.1f}% of portfolio"
                 )
 
 except Exception as e:
