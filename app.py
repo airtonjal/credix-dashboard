@@ -417,35 +417,37 @@ try:
             WITH base_data AS (
                 SELECT 
                     asset_id,
-                    DATE(first_issue_date) as cohort_date,
+                    DATE_TRUNC(DATE(first_issue_date), MONTH) as cohort_date,
                     DATE(last_due_date) as last_due_date,
                     total_expected_amount,
                     total_paid_amount,
                     payment_status
                 FROM `credix-analytics.gold.fact_payment_performance`
                 WHERE last_due_date IS NOT NULL
+                  AND first_issue_date IS NOT NULL
             ),
             daily_progression AS (
                 SELECT 
                     cohort_date,
-                    last_due_date,
+                    DATE_TRUNC(last_due_date, MONTH) as analysis_date,
                     DATE_DIFF(last_due_date, cohort_date, DAY) as days_since_origination,
                     COUNT(DISTINCT asset_id) as total_loans,
                     SUM(total_paid_amount) as total_paid,
                     SUM(total_expected_amount) as total_expected,
                     COUNT(CASE WHEN payment_status IN ('FULLY_PAID_ON_TIME', 'FULLY_PAID_WITH_DELAYS') THEN 1 END) as completed_loans
                 FROM base_data
-                GROUP BY cohort_date, last_due_date
+                GROUP BY cohort_date, analysis_date, days_since_origination
             )
             SELECT 
                 cohort_date,
                 days_since_origination,
-                100 - ROUND(total_paid / NULLIF(total_expected, 0) * 100, 2) as default_rate,
-                ROUND(completed_loans / NULLIF(total_loans, 0) * 100, 2) as loans_completed_pct,
-                total_loans
+                100 - ROUND(SUM(total_paid) / NULLIF(SUM(total_expected), 0) * 100, 2) as default_rate,
+                ROUND(SUM(completed_loans) / NULLIF(SUM(total_loans), 0) * 100, 2) as loans_completed_pct,
+                SUM(total_loans) as total_loans
             FROM daily_progression
             WHERE days_since_origination >= 0
-              AND cohort_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 180 DAY)  -- Last 180 days of cohorts
+              AND cohort_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)
+            GROUP BY cohort_date, days_since_origination
             ORDER BY cohort_date, days_since_origination
             """
             return pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
