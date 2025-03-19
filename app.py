@@ -223,53 +223,89 @@ try:
         st.plotly_chart(fig_risk, use_container_width=True)
 
     elif page == "Risk Analysis":
-        st.title("Risk Analysis")
+        st.title("Portfolio Default Rate Analysis")
         
         # Load data
         df_risk = load_portfolio_risk()
         
         # Convert date to datetime and format it
-        df_risk['date'] = pd.to_datetime(df_risk['date']).dt.strftime('%Y-%m-%d')
+        df_risk['date'] = pd.to_datetime(df_risk['snapshot_date']).dt.strftime('%Y-%m-%d')
         
-        # Risk Metrics Over Time
-        st.subheader("Risk Metrics Trend")
-        
-        # Create two columns for different metrics
+        # Create two columns for different delinquency rates
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("Default and NPL Ratios")
-            fig_default = go.Figure()
+            # 15-90 days delinquency (using late payment metrics)
+            fig_early_default = go.Figure()
             
-            metrics = ['default_rate', 'npl_ratio']
-            for metric in metrics:
-                fig_default.add_trace(
-                    go.Scatter(
-                        x=df_risk['date'],
-                        y=df_risk[metric],
-                        name=metric.replace('_', ' ').title(),
-                        hovertemplate="%{y:.2%}<extra></extra>"
-                    )
-                )
+            # Calculate early delinquency rate (15-90 days)
+            early_delinq = df_risk['late_within_30_count'] / df_risk['total_payments'] * 100
             
-            fig_default.update_layout(
-                title="Default Rate and NPL Ratio Over Time",
-                xaxis_title="Date",
-                yaxis_title="Rate",
-                hovermode='x unified',
-                yaxis_tickformat='.2%',  # Format y-axis as percentage
-                xaxis=dict(
-                    type='category',  # Force categorical x-axis
-                    tickangle=-45,  # Angle the dates for better readability
-                    dtick=1  # Show all dates
+            fig_early_default.add_trace(
+                go.Scatter(
+                    x=df_risk['date'],
+                    y=early_delinq,
+                    mode='lines+markers',
+                    name='15-90 days',
+                    line=dict(color='#9B51E0', width=2),
+                    marker=dict(size=6)
                 )
             )
-            st.plotly_chart(fig_default, use_container_width=True)
+            
+            fig_early_default.update_layout(
+                title="15-90 Days Delinquency Rate",
+                xaxis_title="",
+                yaxis_title="Rate (%)",
+                hovermode='x unified',
+                plot_bgcolor='white',
+                yaxis=dict(
+                    tickformat='.1f',
+                    gridcolor='lightgrey',
+                    range=[0, max(early_delinq) * 1.2]  # Add 20% padding
+                ),
+                xaxis=dict(
+                    type='category',
+                    tickangle=-45,
+                    gridcolor='lightgrey'
+                )
+            )
+            st.plotly_chart(fig_early_default, use_container_width=True)
         
         with col2:
-            st.subheader("Late Payment Metrics")
-            fig_late = go.Figure()
+            # 90+ days delinquency (NPL ratio)
+            fig_npl = go.Figure()
             
+            # Convert NPL ratio to percentage
+            npl_pct = df_risk['npl_ratio'] * 100
+            
+            fig_npl.add_trace(
+                go.Scatter(
+                    x=df_risk['date'],
+                    y=npl_pct,
+                    mode='lines+markers',
+                    name='90+ days',
+                    line=dict(color='#9B51E0', width=2),
+                    marker=dict(size=6)
+                )
+            )
+            
+            fig_npl.update_layout(
+                title="90+ Days Delinquency Rate (NPL)",
+                xaxis_title="",
+                yaxis_title="Rate (%)",
+                hovermode='x unified',
+                plot_bgcolor='white',
+                yaxis=dict(
+                    tickformat='.1f',
+                    gridcolor='lightgrey',
+                    range=[0, max(npl_pct) * 1.2]  # Add 20% padding
+                ),
+                xaxis=dict(
+                    type='category',
+                    tickangle=-45,
+                    gridcolor='lightgrey'
+                )
+            )
             metrics = ['avg_max_days_late', 'avg_installments_over_30d_late']
             for metric in metrics:
                 fig_late.add_trace(
@@ -470,61 +506,61 @@ try:
             base_data AS (
                 SELECT 
                     asset_id,
-                    DATE_TRUNC(CAST(first_issue_date AS DATE), MONTH) as cohort_month,
-                    CAST(last_due_date AS DATE) as last_due_date,
+                    DATE(first_issue_date) as cohort_date,
+                    DATE(last_due_date) as last_due_date,
                     total_expected_amount,
                     total_paid_amount,
                     payment_status
                 FROM `gold.fact_payment_performance`
                 WHERE snapshot_date = (SELECT max_date FROM latest_snapshot)
             ),
-            monthly_progression AS (
+            daily_progression AS (
                 SELECT 
-                    cohort_month,
+                    cohort_date,
                     last_due_date,
-                    DATE_DIFF(last_due_date, cohort_month, MONTH) as months_since_origination,
+                    DATE_DIFF(last_due_date, cohort_date, DAY) as days_since_origination,
                     COUNT(DISTINCT asset_id) as total_loans,
                     SUM(total_paid_amount) as total_paid,
                     SUM(total_expected_amount) as total_expected,
                     COUNT(CASE WHEN payment_status IN ('FULLY_PAID_ON_TIME', 'FULLY_PAID_WITH_DELAYS') THEN 1 END) as completed_loans
                 FROM base_data
-                GROUP BY cohort_month, last_due_date
+                GROUP BY cohort_date, last_due_date
             )
             SELECT 
-                cohort_month,
-                months_since_origination,
+                cohort_date,
+                days_since_origination,
                 ROUND(total_paid / NULLIF(total_expected, 0) * 100, 2) as completion_rate,
                 ROUND(completed_loans / NULLIF(total_loans, 0) * 100, 2) as loans_completed_pct,
                 total_loans
-            FROM monthly_progression
-            WHERE months_since_origination >= 0
-              AND cohort_month >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)  -- Last 12 months of cohorts
-            ORDER BY cohort_month, months_since_origination
+            FROM daily_progression
+            WHERE days_since_origination >= 0
+              AND cohort_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 180 DAY)  -- Last 180 days of cohorts
+            ORDER BY cohort_date, days_since_origination
             """
             return pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
 
         df_cohort = load_cohort_data()
         
         # Format dates for better display
-        df_cohort['cohort_month'] = pd.to_datetime(df_cohort['cohort_month']).dt.strftime('%Y-%m')
+        df_cohort['cohort_date'] = pd.to_datetime(df_cohort['cohort_date']).dt.strftime('%Y-%m-%d')
         
         # Create line plot
         fig_survival = px.line(
             df_cohort,
-            x='months_since_origination',
+            x='days_since_origination',
             y='completion_rate',
-            color='cohort_month',
+            color='cohort_date',
             title="Payment Completion Rate by Cohort",
             labels={
-                'months_since_origination': 'Months Since Origination',
+                'days_since_origination': 'Days Since Origination',
                 'completion_rate': 'Completion Rate (%)',
-                'cohort_month': 'Cohort'
+                'cohort_date': 'Cohort'
             }
         )
         
         # Update layout to match Nubank's style
         fig_survival.update_layout(
-            xaxis_title="Months Since Origination",
+            xaxis_title="Days Since Origination",
             yaxis_title="Completion Rate (%)",
             plot_bgcolor='white',
             yaxis=dict(
@@ -539,7 +575,7 @@ try:
                 gridcolor='lightgrey',
                 gridwidth=0.5,
                 tickmode='linear',
-                dtick=1,
+                dtick=30,  # Show ticks every 30 days
                 tickangle=0,
                 zeroline=True,
                 zerolinecolor='lightgrey'
@@ -558,7 +594,7 @@ try:
         fig_survival.update_traces(
             line=dict(width=1.5),
             opacity=0.7,
-            hovertemplate='Completion Rate: %{y:.1f}%<br>Months: %{x}<extra></extra>'
+            hovertemplate='Completion Rate: %{y:.1f}%<br>Days: %{x}<extra></extra>'
         )
         
         st.plotly_chart(fig_survival, use_container_width=True)
@@ -566,8 +602,8 @@ try:
         # Add explanation of the visualization
         st.markdown("""
         **How to read this chart:**
-        - Each line represents a cohort of loans originated in a specific month
-        - The x-axis shows how many months have passed since the cohort's origination
+        - Each line represents a cohort of loans originated on a specific date
+        - The x-axis shows how many days have passed since the cohort's origination
         - The y-axis shows what percentage of the expected amount has been paid
         - Steeper lines indicate faster repayment rates
         - Flatter lines suggest slower repayment progression
