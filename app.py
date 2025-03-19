@@ -549,23 +549,56 @@ try:
             values='completion_rate'
         ).fillna(0)
         
-        # Plot heatmap
-        fig_survival = px.imshow(
-            survival_matrix,
-            labels=dict(
-                x="Months Since Origination",
-                y="Cohort Month",
-                color="Completion Rate (%)"
-            ),
-            title="Loan Completion Rate by Cohort Age",
-            color_continuous_scale="RdYlGn",  # Red to Yellow to Green scale
-            aspect="auto"
+        # Convert the matrix to a format suitable for line plotting
+        cohort_lines = []
+        for cohort in survival_matrix.index:
+            cohort_data = survival_matrix.loc[cohort].reset_index()
+            cohort_data.columns = ['months_since_origination', 'completion_rate']
+            cohort_data['cohort'] = cohort
+            cohort_lines.append(cohort_data)
+        
+        df_lines = pd.concat(cohort_lines, ignore_index=True)
+        
+        # Create line plot
+        fig_survival = px.line(
+            df_lines,
+            x='months_since_origination',
+            y='completion_rate',
+            color='cohort',
+            title="Loan Completion Rate by Cohort Over Time",
+            labels={
+                'months_since_origination': 'Months Since Origination',
+                'completion_rate': 'Completion Rate (%)',
+                'cohort': 'Cohort'
+            }
         )
+        
         fig_survival.update_layout(
             xaxis_title="Months Since Origination",
-            yaxis_title="Cohort Month",
-            yaxis_tickangle=0
+            yaxis_title="Completion Rate (%)",
+            showlegend=True,
+            yaxis_range=[0, 100],
+            xaxis=dict(
+                tickmode='linear',
+                dtick=1,
+                tickangle=0
+            ),
+            plot_bgcolor='white',
+            legend=dict(
+                yanchor="top",
+                y=-0.2,
+                xanchor="left",
+                x=0,
+                orientation="h"
+            )
         )
+        
+        # Update line properties to match Nubank's style
+        fig_survival.update_traces(
+            line=dict(width=1.5),
+            opacity=0.7
+        )
+        
         st.plotly_chart(fig_survival, use_container_width=True)
         
         # Average Days Late Analysis
