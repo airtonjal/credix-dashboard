@@ -175,30 +175,106 @@ try:
         # Load data
         df_risk = load_portfolio_risk()
         
+        # Convert snapshot_date to datetime for proper plotting
+        df_risk['snapshot_date'] = pd.to_datetime(df_risk['snapshot_date'])
+        
         # Risk Metrics Over Time
         st.subheader("Risk Metrics Trend")
-        fig_risk = go.Figure()
         
-        metrics = ['default_rate', 'recovery_rate', 'loss_given_default']
-        for metric in metrics:
-            fig_risk.add_trace(
+        # Create two columns for different metrics
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Default and NPL Ratios")
+            fig_default = go.Figure()
+            
+            metrics = ['default_rate', 'npl_ratio']
+            for metric in metrics:
+                fig_default.add_trace(
+                    go.Scatter(
+                        x=df_risk['snapshot_date'],
+                        y=df_risk[metric],
+                        name=metric.replace('_', ' ').title(),
+                        hovertemplate="%{y:.2%}<extra></extra>"
+                    )
+                )
+            
+            fig_default.update_layout(
+                title="Default Rate and NPL Ratio Over Time",
+                xaxis_title="Date",
+                yaxis_title="Rate",
+                hovermode='x unified',
+                yaxis_tickformat='.2%'  # Format y-axis as percentage
+            )
+            st.plotly_chart(fig_default, use_container_width=True)
+        
+        with col2:
+            st.subheader("Late Payment Metrics")
+            fig_late = go.Figure()
+            
+            metrics = ['avg_max_days_late', 'avg_installments_over_30d_late']
+            for metric in metrics:
+                fig_late.add_trace(
+                    go.Scatter(
+                        x=df_risk['snapshot_date'],
+                        y=df_risk[metric],
+                        name=metric.replace('_', ' ').title()
+                    )
+                )
+            
+            fig_late.update_layout(
+                title="Late Payment Metrics Over Time",
+                xaxis_title="Date",
+                yaxis_title="Value",
+                hovermode='x unified'
+            )
+            st.plotly_chart(fig_late, use_container_width=True)
+        
+        # Portfolio Composition
+        st.subheader("Portfolio Composition")
+        
+        # Calculate percentages for each category
+        df_risk['on_time_pct'] = df_risk['fully_paid_on_time_amount'] / df_risk['total_portfolio_value'] * 100
+        df_risk['delayed_pct'] = df_risk['fully_paid_delayed_amount'] / df_risk['total_portfolio_value'] * 100
+        df_risk['overdue_pct'] = df_risk['overdue_amount'] / df_risk['total_portfolio_value'] * 100
+        df_risk['npl_pct'] = df_risk['npl_amount'] / df_risk['total_portfolio_value'] * 100
+        
+        fig_composition = go.Figure()
+        
+        categories = [
+            ('on_time_pct', 'Paid On Time'),
+            ('delayed_pct', 'Paid with Delay'),
+            ('overdue_pct', 'Overdue'),
+            ('npl_pct', 'NPL')
+        ]
+        
+        for col, name in categories:
+            fig_composition.add_trace(
                 go.Scatter(
                     x=df_risk['snapshot_date'],
-                    y=df_risk[metric],
-                    name=metric.replace('_', ' ').title()
+                    y=df_risk[col],
+                    name=name,
+                    stackgroup='one',
+                    hovertemplate="%{y:.1f}%<extra></extra>"
                 )
             )
         
-        fig_risk.update_layout(
-            title="Risk Metrics Over Time",
+        fig_composition.update_layout(
+            title="Portfolio Composition Over Time",
             xaxis_title="Date",
-            yaxis_title="Rate",
-            hovermode='x unified'
+            yaxis_title="Percentage of Portfolio",
+            hovermode='x unified',
+            yaxis_range=[0, 100],
+            yaxis_ticksuffix='%'
         )
-        st.plotly_chart(fig_risk, use_container_width=True)
+        st.plotly_chart(fig_composition, use_container_width=True)
         
         # Cohort Analysis
         st.subheader("Cohort Analysis")
+        
+        # Convert cohort_month to datetime for better display
+        df_risk['cohort_month'] = pd.to_datetime(df_risk['cohort_month'])
+        
         cohort_matrix = df_risk.pivot(
             index='snapshot_date',
             columns='cohort_month',
@@ -208,9 +284,20 @@ try:
         fig_cohort = px.imshow(
             cohort_matrix,
             title="Default Rate by Cohort",
-            labels=dict(x="Cohort Month", y="Snapshot Date", color="Default Rate"),
-            aspect="auto"
+            labels=dict(
+                x="Cohort Month",
+                y="Snapshot Date",
+                color="Default Rate"
+            ),
+            aspect="auto",
+            color_continuous_scale="RdYlBu_r"
         )
+        
+        # Format the values as percentages
+        fig_cohort.update_traces(
+            hovertemplate="Cohort Month: %{x}<br>Snapshot Date: %{y}<br>Default Rate: %{z:.2%}<extra></extra>"
+        )
+        
         st.plotly_chart(fig_cohort, use_container_width=True)
 
     else:  # Payment Behavior
