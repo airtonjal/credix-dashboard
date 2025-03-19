@@ -124,7 +124,7 @@ def load_payment_performance():
 st.sidebar.title("Credix Analytics")
 page = st.sidebar.radio(
     "Choose a Dashboard",
-    ["Portfolio Overview", "Risk Analysis", "Payment Behavior"],
+    ["Portfolio Overview", "Risk Analysis", "Payment Behavior", "Cohort Analysis"],
     index=0,  # Default to first option
     key="navigation"
 )
@@ -368,7 +368,7 @@ try:
         
         st.plotly_chart(fig_cohort, use_container_width=True)
 
-    else:  # Payment Behavior
+    elif page == "Payment Behavior":
         st.title("Payment Behavior Analysis")
         
         # Load data
@@ -454,6 +454,141 @@ try:
                     f"{data['count']:,} loans",
                     f"{data['percentage']:.1f}% of portfolio"
                 )
+
+    elif page == "Cohort Analysis":
+        st.title("Cohort Analysis")
+        
+        # Load cohort data
+        @st.cache_data(ttl="1h")
+        def load_cohort_data():
+            client = get_bigquery_client()
+            query = """
+            WITH latest_snapshot AS (
+                SELECT MAX(snapshot_date) as max_date
+                FROM `gold.fact_payment_performance`
+            ),
+            cohort_metrics AS (
+                SELECT 
+                    cohort_month,
+                    DATE_DIFF(snapshot_date, cohort_month, MONTH) as cohort_age_months,
+                    COUNT(DISTINCT asset_id) as total_loans,
+                    COUNT(CASE WHEN payment_status IN ('FULLY_PAID_ON_TIME', 'FULLY_PAID_WITH_DELAYS') THEN 1 END) as completed_loans,
+                    AVG(CASE WHEN payment_status IN ('FULLY_PAID_ON_TIME', 'FULLY_PAID_WITH_DELAYS') 
+                        THEN TIMESTAMP_DIFF(CAST(last_due_date AS TIMESTAMP), CAST(first_issue_date AS TIMESTAMP), DAY)
+                        END) as avg_days_to_completion,
+                    AVG(CASE WHEN max_days_late > 0 THEN max_days_late END) as avg_days_late
+                FROM `gold.fact_payment_performance`
+                WHERE snapshot_date = (SELECT max_date FROM latest_snapshot)
+                GROUP BY cohort_month, cohort_age_months
+            )
+            SELECT * FROM cohort_metrics
+            ORDER BY cohort_month
+            """
+            return pd.read_gbq(query, credentials=client.credentials)
+
+        df_cohort = load_cohort_data()
+        
+        # Calculate completion rate
+        df_cohort['completion_rate'] = (df_cohort['completed_loans'] / df_cohort['total_loans'] * 100).round(2)
+        
+        # Format dates for better display
+        df_cohort['cohort_month'] = pd.to_datetime(df_cohort['cohort_month']).dt.strftime('%Y-%m')
+        
+        # Loan Duration Analysis
+        st.subheader("Loan Duration Analysis")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Average Days to Completion by Cohort
+            fig_duration = px.bar(
+                df_cohort,
+                x='cohort_month',
+                y='avg_days_to_completion',
+                title="Average Days to Loan Completion by Cohort",
+                labels={
+                    'cohort_month': 'Cohort Month',
+                    'avg_days_to_completion': 'Average Days to Completion'
+                }
+            )
+            fig_duration.update_layout(
+                xaxis_tickangle=-45,
+                xaxis_title="Cohort Month",
+                yaxis_title="Days",
+                showlegend=False
+            )
+            st.plotly_chart(fig_duration, use_container_width=True)
+        
+        with col2:
+            # Completion Rate by Cohort
+            fig_completion = px.line(
+                df_cohort,
+                x='cohort_month',
+                y='completion_rate',
+                title="Loan Completion Rate by Cohort",
+                labels={
+                    'cohort_month': 'Cohort Month',
+                    'completion_rate': 'Completion Rate (%)'
+                }
+            )
+            fig_completion.update_layout(
+                xaxis_tickangle=-45,
+                xaxis_title="Cohort Month",
+                yaxis_title="Completion Rate (%)",
+                showlegend=False
+            )
+            st.plotly_chart(fig_completion, use_container_width=True)
+        
+        # Cohort Survival Analysis
+        st.subheader("Cohort Survival Analysis")
+        
+        # Create survival matrix
+        survival_matrix = df_cohort.pivot(
+            index='cohort_month',
+            columns='cohort_age_months',
+            values='completion_rate'
+        ).fillna(0)
+        
+        # Plot heatmap
+        fig_survival = px.imshow(
+            survival_matrix,
+            labels=dict(
+                x="Months Since Origination",
+                y="Cohort Month",
+                color="Completion Rate (%)"
+            ),
+            title="Loan Completion Rate by Cohort Age",
+            color_continuous_scale="RdYlGn",  # Red to Yellow to Green scale
+            aspect="auto"
+        )
+        fig_survival.update_layout(
+            xaxis_title="Months Since Origination",
+            yaxis_title="Cohort Month",
+            yaxis_tickangle=0
+        )
+        st.plotly_chart(fig_survival, use_container_width=True)
+        
+        # Average Days Late Analysis
+        st.subheader("Payment Delay Analysis")
+        fig_delays = px.scatter(
+            df_cohort,
+            x='cohort_month',
+            y='avg_days_late',
+            size='total_loans',
+            title="Average Days Late by Cohort",
+            labels={
+                'cohort_month': 'Cohort Month',
+                'avg_days_late': 'Average Days Late',
+                'total_loans': 'Number of Loans'
+            }
+        )
+        fig_delays.update_layout(
+            xaxis_tickangle=-45,
+            xaxis_title="Cohort Month",
+            yaxis_title="Average Days Late",
+            showlegend=True
+        )
+        st.plotly_chart(fig_delays, use_container_width=True)
 
 except Exception as e:
     st.error(f"An error occurred: {str(e)}")
