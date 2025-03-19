@@ -414,11 +414,7 @@ try:
         def load_cohort_data():
             credentials = get_credentials()
             query = """
-            WITH latest_snapshot AS (
-                SELECT MAX(snapshot_date) as max_date
-                FROM `credix-analytics.gold.fact_payment_performance`
-            ),
-            base_data AS (
+            WITH base_data AS (
                 SELECT 
                     asset_id,
                     DATE(first_issue_date) as cohort_date,
@@ -427,7 +423,7 @@ try:
                     total_paid_amount,
                     payment_status
                 FROM `credix-analytics.gold.fact_payment_performance`
-                WHERE snapshot_date = (SELECT max_date FROM latest_snapshot)
+                WHERE last_due_date IS NOT NULL
             ),
             daily_progression AS (
                 SELECT 
