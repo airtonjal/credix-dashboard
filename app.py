@@ -466,12 +466,12 @@ try:
             WITH payment_data AS (
                 SELECT 
                     asset_id,
-                    DATE_TRUNC(first_issue_date, MONTH) as cohort_month,
+                    DATE_TRUNC(CAST(first_issue_date AS DATE), MONTH) as cohort_month,
                     payment_status,
                     total_original_amount,
                     total_expected_amount,
                     total_paid_amount,
-                    snapshot_date
+                    CAST(snapshot_date AS DATE) as snapshot_date
                 FROM `gold.fact_payment_performance`
             ),
             cohort_progression AS (
