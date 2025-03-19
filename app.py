@@ -59,7 +59,7 @@ def load_payment_performance():
             DATE(snapshot_date) as date,
             payment_status,
             COUNT(*) as count,
-            SUM(original_amount) as total_amount
+            SUM(total_original_amount) as total_amount
         FROM `gold.fact_payment_performance`
         GROUP BY DATE(snapshot_date), payment_status
         ORDER BY date
