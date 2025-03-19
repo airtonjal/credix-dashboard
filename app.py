@@ -442,37 +442,37 @@ try:
                 FROM base_data
                 GROUP BY cohort_month, analysis_date, days_since_origination
             ),
-            cumulative_stats AS (
+            default_rates AS (
                 SELECT 
                     cohort_month,
                     days_since_origination,
                     analysis_date,
-                    MAX(total_loans) as total_loans,
-                    SUM(total_paid_amount) OVER (
-                        PARTITION BY cohort_month 
-                        ORDER BY analysis_date 
-                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                    ) as cumulative_paid_amount,
-                    SUM(total_expected_amount) OVER (
-                        PARTITION BY cohort_month 
-                        ORDER BY analysis_date 
-                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                    ) as cumulative_expected_amount,
-                    MAX(paid_loans) as paid_loans
-                FROM daily_stats
-                GROUP BY 
-                    cohort_month, 
-                    days_since_origination, 
-                    analysis_date,
+                    total_loans,
                     total_paid_amount,
-                    total_expected_amount
+                    total_expected_amount,
+                    paid_loans,
+                    ROUND(100 * (1 - SAFE_DIVIDE(total_paid_amount, total_expected_amount)), 2) as daily_default_rate
+                FROM daily_stats
+            ),
+            cumulative_stats AS (
+                SELECT 
+                    cohort_month,
+                    days_since_origination,
+                    total_loans,
+                    MAX(daily_default_rate) OVER (
+                        PARTITION BY cohort_month 
+                        ORDER BY analysis_date 
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                    ) as default_rate,
+                    ROUND(100 * SAFE_DIVIDE(paid_loans, total_loans), 2) as paid_rate
+                FROM default_rates
             )
             SELECT 
                 cohort_month,
                 days_since_origination,
                 total_loans,
-                ROUND(100 * (1 - SAFE_DIVIDE(cumulative_paid_amount, cumulative_expected_amount)), 2) as default_rate,
-                ROUND(100 * SAFE_DIVIDE(paid_loans, total_loans), 2) as paid_rate
+                default_rate,
+                paid_rate
             FROM cumulative_stats
             WHERE cohort_month >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)
             ORDER BY cohort_month, days_since_origination
