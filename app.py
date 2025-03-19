@@ -228,9 +228,6 @@ try:
         # Load data
         df_risk = load_portfolio_risk()
         
-        # Convert date to datetime and format it
-        df_risk['date'] = pd.to_datetime(df_risk['snapshot_date']).dt.strftime('%Y-%m-%d')
-        
         # Create two columns for different delinquency rates
         col1, col2 = st.columns(2)
         
@@ -243,7 +240,7 @@ try:
             
             fig_early_default.add_trace(
                 go.Scatter(
-                    x=df_risk['date'],
+                    x=df_risk['date'].dt.strftime('%Y-%m-%d'),
                     y=early_delinq,
                     mode='lines+markers',
                     name='15-90 days',
@@ -280,7 +277,7 @@ try:
             
             fig_npl.add_trace(
                 go.Scatter(
-                    x=df_risk['date'],
+                    x=df_risk['date'].dt.strftime('%Y-%m-%d'),
                     y=npl_pct,
                     mode='lines+markers',
                     name='90+ days',
@@ -306,28 +303,7 @@ try:
                     gridcolor='lightgrey'
                 )
             )
-            metrics = ['avg_max_days_late', 'avg_installments_over_30d_late']
-            for metric in metrics:
-                fig_late.add_trace(
-                    go.Scatter(
-                        x=df_risk['date'],
-                        y=df_risk[metric],
-                        name=metric.replace('_', ' ').title()
-                    )
-                )
-            
-            fig_late.update_layout(
-                title="Late Payment Metrics Over Time",
-                xaxis_title="Date",
-                yaxis_title="Value",
-                hovermode='x unified',
-                xaxis=dict(
-                    type='category',  # Force categorical x-axis
-                    tickangle=-45,  # Angle the dates for better readability
-                    dtick=1  # Show all dates
-                )
-            )
-            st.plotly_chart(fig_late, use_container_width=True)
+            st.plotly_chart(fig_npl, use_container_width=True)
         
         # Portfolio Composition
         st.subheader("Portfolio Composition")
@@ -350,7 +326,7 @@ try:
         for col, name in categories:
             fig_composition.add_trace(
                 go.Scatter(
-                    x=df_risk['date'],
+                    x=df_risk['date'].dt.strftime('%Y-%m-%d'),
                     y=df_risk[col],
                     name=name,
                     stackgroup='one',
