@@ -122,9 +122,11 @@ def load_payment_performance():
 
 # Sidebar
 st.sidebar.title("Credix Analytics")
-page = st.sidebar.selectbox(
+page = st.sidebar.radio(
     "Choose a Dashboard",
-    ["Portfolio Overview", "Risk Analysis", "Payment Behavior"]
+    ["Portfolio Overview", "Risk Analysis", "Payment Behavior"],
+    index=0,  # Default to first option
+    key="navigation"
 )
 
 try:
@@ -404,7 +406,11 @@ try:
                 xaxis=dict(
                     type='category',
                     tickangle=-45,
-                    dtick=1
+                    # Show approximately 10 ticks
+                    nticks=10,
+                    # Show first and last date
+                    showfirstlabel=True,
+                    showlastlabel=True
                 )
             )
             st.plotly_chart(fig_count, use_container_width=True)
@@ -431,7 +437,11 @@ try:
                 xaxis=dict(
                     type='category',
                     tickangle=-45,
-                    dtick=1
+                    # Show approximately 10 ticks
+                    nticks=10,
+                    # Show first and last date
+                    showfirstlabel=True,
+                    showlastlabel=True
                 )
             )
             st.plotly_chart(fig_amount, use_container_width=True)
