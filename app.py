@@ -54,15 +54,24 @@ def load_portfolio_risk():
 def load_payment_performance():
     credentials = get_credentials()
     query = """
+    WITH daily_stats AS (
+        SELECT 
+            DATE(snapshot_date) as date,
+            payment_status,
+            COUNT(*) as count,
+            SUM(original_amount) as total_amount
+        FROM `gold.fact_payment_performance`
+        GROUP BY DATE(snapshot_date), payment_status
+        ORDER BY date
+    )
     SELECT 
-        pp.*,
-        b.buyer_tax_id as company_id,
-        b.main_cnae as industry_sector,
-        b.uf as state_code,
-        b.company_size,
-        b.risk_category
-    FROM `gold.fact_payment_performance` pp
-    JOIN `gold.dim_borrower` b ON pp.borrower_key = b.borrower_key
+        date,
+        payment_status,
+        count,
+        total_amount,
+        ROUND(total_amount / SUM(total_amount) OVER (PARTITION BY date) * 100, 2) as percentage
+    FROM daily_stats
+    ORDER BY date, payment_status
     """
     return pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
 
@@ -212,33 +221,57 @@ try:
         
         # Payment Status Timeline
         st.subheader("Payment Status Over Time")
-        status_time = df_payment.groupby(['snapshot_date', 'payment_status']).size().unstack(fill_value=0)
         
-        fig_timeline = px.area(
-            status_time,
-            title="Payment Status Distribution Over Time"
-        )
-        fig_timeline.update_layout(
-            xaxis_title="Date",
-            yaxis_title="Number of Loans",
-            hovermode='x unified'
-        )
-        st.plotly_chart(fig_timeline, use_container_width=True)
+        # Create two columns for different views
+        col1, col2 = st.columns(2)
         
-        # Payment Behavior by Industry
-        st.subheader("Payment Behavior by Industry")
-        industry_payment = df_payment.groupby(['industry_sector', 'payment_status']).size().unstack(fill_value=0)
+        with col1:
+            st.subheader("Number of Loans by Status")
+            fig_count = px.area(
+                df_payment,
+                x='date',
+                y='count',
+                color='payment_status',
+                title="Number of Loans by Payment Status Over Time"
+            )
+            fig_count.update_layout(
+                xaxis_title="Date",
+                yaxis_title="Number of Loans",
+                hovermode='x unified'
+            )
+            st.plotly_chart(fig_count, use_container_width=True)
         
-        fig_industry = px.bar(
-            industry_payment,
-            barmode='stack',
-            title="Payment Status Distribution by Industry"
-        )
-        fig_industry.update_layout(
-            xaxis_title="Industry",
-            yaxis_title="Number of Loans"
-        )
-        st.plotly_chart(fig_industry, use_container_width=True)
+        with col2:
+            st.subheader("Portfolio Value by Status (%)")
+            fig_amount = px.area(
+                df_payment,
+                x='date',
+                y='percentage',
+                color='payment_status',
+                title="Portfolio Value Distribution by Payment Status (%)"
+            )
+            fig_amount.update_layout(
+                xaxis_title="Date",
+                yaxis_title="Percentage of Portfolio Value (%)",
+                hovermode='x unified',
+                yaxis_range=[0, 100]  # Force y-axis to show full percentage range
+            )
+            st.plotly_chart(fig_amount, use_container_width=True)
+        
+        # Add metrics for the latest date
+        st.subheader("Latest Payment Status Metrics")
+        latest_date = df_payment['date'].max()
+        latest_data = df_payment[df_payment['date'] == latest_date]
+        
+        # Create metrics
+        cols = st.columns(len(latest_data))
+        for i, (status, data) in enumerate(latest_data.groupby('payment_status')):
+            with cols[i]:
+                st.metric(
+                    f"{status}",
+                    f"{data['count'].iloc[0]:,} loans",
+                    f"{data['percentage'].iloc[0]:.1f}% of portfolio"
+                )
 
 except Exception as e:
     st.error(f"An error occurred: {str(e)}")
