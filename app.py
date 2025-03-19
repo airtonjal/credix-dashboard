@@ -461,7 +461,7 @@ try:
         # Load cohort data
         @st.cache_data(ttl="1h")
         def load_cohort_data():
-            client = get_bigquery_client()
+            credentials = get_credentials()
             query = """
             WITH latest_snapshot AS (
                 SELECT MAX(snapshot_date) as max_date
@@ -484,7 +484,7 @@ try:
             SELECT * FROM cohort_metrics
             ORDER BY cohort_month
             """
-            return pd.read_gbq(query, credentials=client.credentials)
+            return pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
 
         df_cohort = load_cohort_data()
         
