@@ -35,8 +35,8 @@ def load_loan_performance():
         b.uf as state_code,
         b.company_size,
         b.risk_category
-    FROM `gold.fact_loan_performance` lp
-    JOIN `gold.dim_borrower` b ON lp.borrower_key = b.borrower_key
+    FROM `credix-analytics.gold.fact_loan_performance` lp
+    JOIN `credix-analytics.gold.dim_borrower` b ON lp.borrower_key = b.borrower_key
     """
     return pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
 
@@ -45,7 +45,7 @@ def load_portfolio_risk():
     credentials = get_credentials()
     query = """
     SELECT 
-        last_due_date,
+        snapshot_date,
         default_rate,
         npl_ratio,
         avg_max_days_late,
@@ -57,8 +57,8 @@ def load_portfolio_risk():
         total_portfolio_value,
         late_within_30_count,
         total_payments
-    FROM `gold.fact_portfolio_risk`
-    ORDER BY last_due_date
+    FROM `credix-analytics.gold.fact_portfolio_risk`
+    ORDER BY snapshot_date
     """
     return pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
 
@@ -69,13 +69,13 @@ def load_payment_performance():
     WITH latest_data AS (
         SELECT 
             asset_id,
-            due_date,
+            last_due_date,
             payment_status,
             total_original_amount,
             total_expected_amount,
             total_paid_amount,
-            ROW_NUMBER() OVER (PARTITION BY asset_id ORDER BY due_date DESC) as rn
-        FROM `gold.fact_payment_performance`
+            ROW_NUMBER() OVER (PARTITION BY asset_id ORDER BY last_due_date DESC) as rn
+        FROM `credix-analytics.gold.fact_payment_performance`
     ),
     current_status AS (
         SELECT 
@@ -88,12 +88,12 @@ def load_payment_performance():
     ),
     historical_stats AS (
         SELECT 
-            DATE(due_date) as date,
+            DATE(last_due_date) as date,
             payment_status,
             COUNT(*) as count,
             SUM(total_original_amount) as total_amount
-        FROM `gold.fact_payment_performance`
-        GROUP BY DATE(due_date), payment_status
+        FROM `credix-analytics.gold.fact_payment_performance`
+        GROUP BY DATE(last_due_date), payment_status
     )
     SELECT 
         'CURRENT' as date,
@@ -410,7 +410,7 @@ try:
             query = """
             WITH latest_snapshot AS (
                 SELECT MAX(snapshot_date) as max_date
-                FROM `gold.fact_payment_performance`
+                FROM `credix-analytics.gold.fact_payment_performance`
             ),
             base_data AS (
                 SELECT 
@@ -420,7 +420,7 @@ try:
                     total_expected_amount,
                     total_paid_amount,
                     payment_status
-                FROM `gold.fact_payment_performance`
+                FROM `credix-analytics.gold.fact_payment_performance`
                 WHERE snapshot_date = (SELECT max_date FROM latest_snapshot)
             ),
             daily_progression AS (
