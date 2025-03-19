@@ -488,7 +488,7 @@ try:
         
         # Update layout to match Nubank's style
         fig_survival.update_layout(
-            title="Portfolio Default Rate by Cohort",
+            title=None,  # Remove the title since we have the page title
             xaxis_title="Days Since Origination",
             yaxis_title="Default Rate (%)",
             plot_bgcolor='white',
@@ -518,7 +518,7 @@ try:
                 orientation="h"
             ),
             hovermode='x unified',
-            margin=dict(t=50, b=100)  # Adjust margins to accommodate the legend
+            margin=dict(t=20, b=100)  # Reduced top margin since we removed the title
         )
         
         st.plotly_chart(fig_survival, use_container_width=True)
