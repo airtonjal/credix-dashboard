@@ -423,14 +423,14 @@ try:
                     total_paid_amount,
                     payment_status,
                     CASE 
-                        WHEN paid_date IS NOT NULL THEN 
+                        WHEN payment_status IN ('FULLY_PAID_ON_TIME', 'FULLY_PAID_WITH_DELAYS') THEN 
                             CASE 
-                                WHEN paid_amount_in_cents > 0 THEN 'PAID'
+                                WHEN total_paid_amount > 0 THEN 'PAID'
                                 ELSE 'PAID_ZERO_AMOUNT'
                             END
                         ELSE 
                             CASE 
-                                WHEN DATE(due_date) < CURRENT_DATE() THEN 'OVERDUE'
+                                WHEN DATE(last_due_date) < CURRENT_DATE() THEN 'OVERDUE'
                                 ELSE 'PENDING'
                             END
                     END as detailed_payment_status
