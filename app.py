@@ -418,7 +418,7 @@ try:
                 SELECT 
                     asset_id,
                     DATE_TRUNC(DATE(first_issue_date), MONTH) as cohort_month,
-                    DATE_TRUNC(DATE(last_due_date), MONTH) as analysis_month,
+                    DATE(last_due_date) as analysis_date,
                     total_expected_amount,
                     total_paid_amount,
                     payment_status,
@@ -430,27 +430,27 @@ try:
                 WHERE first_issue_date IS NOT NULL
                   AND last_due_date IS NOT NULL
             ),
-            monthly_stats AS (
+            daily_stats AS (
                 SELECT 
                     cohort_month,
-                    analysis_month,
-                    DATE_DIFF(analysis_month, cohort_month, MONTH) as months_since_origination,
+                    analysis_date,
+                    DATE_DIFF(analysis_date, cohort_month, DAY) as days_since_origination,
                     COUNT(DISTINCT asset_id) as total_loans,
                     SUM(total_paid_amount) as cumulative_paid_amount,
                     SUM(total_expected_amount) as total_expected_amount,
                     COUNTIF(is_paid = 1) as paid_loans
                 FROM base_data
-                GROUP BY cohort_month, analysis_month, months_since_origination
+                GROUP BY cohort_month, analysis_date, days_since_origination
             )
             SELECT 
                 cohort_month,
-                months_since_origination,
+                days_since_origination,
                 total_loans,
                 ROUND(100 * (1 - SAFE_DIVIDE(cumulative_paid_amount, total_expected_amount)), 2) as default_rate,
                 ROUND(100 * SAFE_DIVIDE(paid_loans, total_loans), 2) as paid_rate
-            FROM monthly_stats
+            FROM daily_stats
             WHERE cohort_month >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)
-            ORDER BY cohort_month, months_since_origination
+            ORDER BY cohort_month, days_since_origination
             """
             return pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
 
@@ -487,7 +487,7 @@ try:
                 
                 fig_default.add_trace(
                     go.Scatter(
-                        x=cohort_data['months_since_origination'],
+                        x=cohort_data['days_since_origination'],
                         y=cohort_data['default_rate'],
                         name=f"Cohort {cohort}",
                         mode='lines+markers'
@@ -496,7 +496,7 @@ try:
             
             fig_default.update_layout(
                 title="Default Rate Evolution by Cohort",
-                xaxis_title="Months Since Origination",
+                xaxis_title="Days Since Origination",
                 yaxis_title="Default Rate (%)",
                 plot_bgcolor='white',
                 paper_bgcolor='white',
@@ -508,7 +508,7 @@ try:
                 xaxis=dict(
                     gridcolor='rgba(0,0,0,0.1)',
                     tickmode='linear',
-                    dtick=1
+                    dtick=30  # Show tick every 30 days
                 ),
                 hovermode='x unified'
             )
@@ -523,7 +523,7 @@ try:
                 
                 fig_payment.add_trace(
                     go.Scatter(
-                        x=cohort_data['months_since_origination'],
+                        x=cohort_data['days_since_origination'],
                         y=cohort_data['paid_rate'],
                         name=f"Cohort {cohort}",
                         mode='lines+markers'
@@ -532,7 +532,7 @@ try:
             
             fig_payment.update_layout(
                 title="Payment Rate Evolution by Cohort",
-                xaxis_title="Months Since Origination",
+                xaxis_title="Days Since Origination",
                 yaxis_title="Payment Rate (%)",
                 plot_bgcolor='white',
                 paper_bgcolor='white',
@@ -544,7 +544,7 @@ try:
                 xaxis=dict(
                     gridcolor='rgba(0,0,0,0.1)',
                     tickmode='linear',
-                    dtick=1
+                    dtick=30  # Show tick every 30 days
                 ),
                 hovermode='x unified'
             )
@@ -583,7 +583,7 @@ try:
         
         1. **Default Rate Evolution:**
            - Each line represents a cohort of loans originated in a specific month
-           - The x-axis shows months since the cohort's origination
+           - The x-axis shows days since the cohort's origination
            - The y-axis shows the default rate (percentage of expected amount not yet paid)
            - Default rates typically decrease over time as payments are made
            - Higher lines indicate worse performance (higher default rates)
