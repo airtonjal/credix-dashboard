@@ -44,33 +44,21 @@ def load_loan_performance():
 def load_portfolio_risk():
     credentials = get_credentials()
     query = """
-    WITH dates AS (
-        SELECT DISTINCT date
-        FROM `gold.fact_portfolio_risk`
-        ORDER BY date
-    ),
-    monthly_stats AS (
-        SELECT 
-            date,
-            default_rate,
-            npl_ratio,
-            avg_max_days_late,
-            avg_installments_over_30d_late,
-            fully_paid_on_time_amount,
-            fully_paid_delayed_amount,
-            overdue_amount,
-            npl_amount,
-            total_portfolio_value,
-            late_within_30_count,
-            total_payments
-        FROM `gold.fact_portfolio_risk`
-    )
     SELECT 
-        d.date,
-        ms.*
-    FROM dates d
-    LEFT JOIN monthly_stats ms ON d.date = ms.date
-    ORDER BY d.date
+        last_due_date,
+        default_rate,
+        npl_ratio,
+        avg_max_days_late,
+        avg_installments_over_30d_late,
+        fully_paid_on_time_amount,
+        fully_paid_delayed_amount,
+        overdue_amount,
+        npl_amount,
+        total_portfolio_value,
+        late_within_30_count,
+        total_payments
+    FROM `gold.fact_portfolio_risk`
+    ORDER BY last_due_date
     """
     return pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
 
@@ -241,7 +229,7 @@ try:
             
             fig_early_default.add_trace(
                 go.Scatter(
-                    x=df_risk['date'].dt.strftime('%Y-%m-%d'),
+                    x=df_risk['last_due_date'].dt.strftime('%Y-%m-%d'),
                     y=early_delinq,
                     mode='lines+markers',
                     name='15-90 days',
@@ -278,7 +266,7 @@ try:
             
             fig_npl.add_trace(
                 go.Scatter(
-                    x=df_risk['date'].dt.strftime('%Y-%m-%d'),
+                    x=df_risk['last_due_date'].dt.strftime('%Y-%m-%d'),
                     y=npl_pct,
                     mode='lines+markers',
                     name='90+ days',
@@ -327,7 +315,7 @@ try:
         for col, name in categories:
             fig_composition.add_trace(
                 go.Scatter(
-                    x=df_risk['date'].dt.strftime('%Y-%m-%d'),
+                    x=df_risk['last_due_date'].dt.strftime('%Y-%m-%d'),
                     y=df_risk[col],
                     name=name,
                     stackgroup='one',
@@ -357,7 +345,7 @@ try:
         df_risk['cohort_month'] = pd.to_datetime(df_risk['cohort_month'])
         
         cohort_matrix = df_risk.pivot(
-            index='date',
+            index='last_due_date',
             columns='cohort_month',
             values='default_rate'
         )
