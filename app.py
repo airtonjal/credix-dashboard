@@ -463,165 +463,105 @@ try:
         def load_cohort_data():
             credentials = get_credentials()
             query = """
-            WITH latest_snapshot AS (
-                SELECT MAX(snapshot_date) as max_date
+            WITH payment_data AS (
+                SELECT 
+                    asset_id,
+                    DATE_TRUNC(first_issue_date, MONTH) as cohort_month,
+                    payment_status,
+                    total_original_amount,
+                    total_expected_amount,
+                    total_paid_amount,
+                    snapshot_date
                 FROM `gold.fact_payment_performance`
             ),
-            cohort_metrics AS (
+            cohort_progression AS (
                 SELECT 
-                    cohort_month,
-                    DATE_DIFF(CAST(snapshot_date AS DATE), CAST(cohort_month AS DATE), MONTH) as cohort_age_months,
-                    COUNT(DISTINCT asset_id) as total_loans,
-                    COUNT(CASE WHEN payment_status IN ('FULLY_PAID_ON_TIME', 'FULLY_PAID_WITH_DELAYS') THEN 1 END) as completed_loans,
-                    AVG(CASE WHEN payment_status IN ('FULLY_PAID_ON_TIME', 'FULLY_PAID_WITH_DELAYS') 
-                        THEN DATE_DIFF(CAST(last_due_date AS DATE), CAST(first_issue_date AS DATE), DAY)
-                        END) as avg_days_to_completion,
-                    AVG(CASE WHEN max_days_late > 0 THEN max_days_late END) as avg_days_late
-                FROM `gold.fact_payment_performance`
-                WHERE snapshot_date = (SELECT max_date FROM latest_snapshot)
-                GROUP BY cohort_month, cohort_age_months
+                    pd.cohort_month,
+                    pd.snapshot_date,
+                    DATE_DIFF(pd.snapshot_date, pd.cohort_month, MONTH) as months_since_origination,
+                    COUNT(DISTINCT pd.asset_id) as total_loans,
+                    SUM(CASE WHEN pd.payment_status IN ('FULLY_PAID_ON_TIME', 'FULLY_PAID_WITH_DELAYS') 
+                        THEN pd.total_paid_amount ELSE 0 END) as paid_amount,
+                    SUM(pd.total_expected_amount) as expected_amount
+                FROM payment_data pd
+                GROUP BY cohort_month, snapshot_date
             )
-            SELECT * FROM cohort_metrics
-            ORDER BY cohort_month
+            SELECT 
+                cohort_month,
+                months_since_origination,
+                ROUND(paid_amount / NULLIF(expected_amount, 0) * 100, 2) as completion_rate,
+                total_loans
+            FROM cohort_progression
+            WHERE months_since_origination >= 0
+            ORDER BY cohort_month, months_since_origination
             """
             return pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
 
         df_cohort = load_cohort_data()
         
-        # Calculate completion rate
-        df_cohort['completion_rate'] = (df_cohort['completed_loans'] / df_cohort['total_loans'] * 100).round(2)
-        
         # Format dates for better display
         df_cohort['cohort_month'] = pd.to_datetime(df_cohort['cohort_month']).dt.strftime('%Y-%m')
         
-        # Loan Duration Analysis
-        st.subheader("Loan Duration Analysis")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Average Days to Completion by Cohort
-            fig_duration = px.bar(
-                df_cohort,
-                x='cohort_month',
-                y='avg_days_to_completion',
-                title="Average Days to Loan Completion by Cohort",
-                labels={
-                    'cohort_month': 'Cohort Month',
-                    'avg_days_to_completion': 'Average Days to Completion'
-                }
-            )
-            fig_duration.update_layout(
-                xaxis_tickangle=-45,
-                xaxis_title="Cohort Month",
-                yaxis_title="Days",
-                showlegend=False
-            )
-            st.plotly_chart(fig_duration, use_container_width=True)
-        
-        with col2:
-            # Completion Rate by Cohort
-            fig_completion = px.line(
-                df_cohort,
-                x='cohort_month',
-                y='completion_rate',
-                title="Loan Completion Rate by Cohort",
-                labels={
-                    'cohort_month': 'Cohort Month',
-                    'completion_rate': 'Completion Rate (%)'
-                }
-            )
-            fig_completion.update_layout(
-                xaxis_tickangle=-45,
-                xaxis_title="Cohort Month",
-                yaxis_title="Completion Rate (%)",
-                showlegend=False
-            )
-            st.plotly_chart(fig_completion, use_container_width=True)
-        
-        # Cohort Survival Analysis
-        st.subheader("Cohort Survival Analysis")
-        
-        # Create survival matrix
-        survival_matrix = df_cohort.pivot(
-            index='cohort_month',
-            columns='cohort_age_months',
-            values='completion_rate'
-        ).fillna(0)
-        
-        # Convert the matrix to a format suitable for line plotting
-        cohort_lines = []
-        for cohort in survival_matrix.index:
-            cohort_data = survival_matrix.loc[cohort].reset_index()
-            cohort_data.columns = ['months_since_origination', 'completion_rate']
-            cohort_data['cohort'] = cohort
-            cohort_lines.append(cohort_data)
-        
-        df_lines = pd.concat(cohort_lines, ignore_index=True)
-        
         # Create line plot
         fig_survival = px.line(
-            df_lines,
+            df_cohort,
             x='months_since_origination',
             y='completion_rate',
-            color='cohort',
-            title="Loan Completion Rate by Cohort Over Time",
+            color='cohort_month',
+            title="Payment Completion Rate by Cohort",
             labels={
                 'months_since_origination': 'Months Since Origination',
                 'completion_rate': 'Completion Rate (%)',
-                'cohort': 'Cohort'
+                'cohort_month': 'Cohort'
             }
         )
         
+        # Update layout to match Nubank's style
         fig_survival.update_layout(
             xaxis_title="Months Since Origination",
             yaxis_title="Completion Rate (%)",
-            showlegend=True,
-            yaxis_range=[0, 100],
+            plot_bgcolor='white',
+            yaxis=dict(
+                range=[0, 100],
+                gridcolor='lightgrey',
+                gridwidth=0.5,
+                tickformat='.0f'
+            ),
             xaxis=dict(
+                gridcolor='lightgrey',
+                gridwidth=0.5,
                 tickmode='linear',
                 dtick=1,
                 tickangle=0
             ),
-            plot_bgcolor='white',
             legend=dict(
                 yanchor="top",
                 y=-0.2,
                 xanchor="left",
                 x=0,
                 orientation="h"
-            )
+            ),
+            hovermode='x unified'
         )
         
-        # Update line properties to match Nubank's style
+        # Update line properties
         fig_survival.update_traces(
             line=dict(width=1.5),
-            opacity=0.7
+            opacity=0.7,
+            hovertemplate='%{y:.1f}%'
         )
         
         st.plotly_chart(fig_survival, use_container_width=True)
         
-        # Average Days Late Analysis
-        st.subheader("Payment Delay Analysis")
-        fig_delays = px.scatter(
-            df_cohort,
-            x='cohort_month',
-            y='avg_days_late',
-            size='total_loans',
-            title="Average Days Late by Cohort",
-            labels={
-                'cohort_month': 'Cohort Month',
-                'avg_days_late': 'Average Days Late',
-                'total_loans': 'Number of Loans'
-            }
-        )
-        fig_delays.update_layout(
-            xaxis_tickangle=-45,
-            xaxis_title="Cohort Month",
-            yaxis_title="Average Days Late",
-            showlegend=True
-        )
-        st.plotly_chart(fig_delays, use_container_width=True)
+        # Add explanation of the visualization
+        st.markdown("""
+        **How to read this chart:**
+        - Each line represents a cohort of loans originated in a specific month
+        - The x-axis shows how many months have passed since the cohort's origination
+        - The y-axis shows what percentage of the expected amount has been paid
+        - Steeper lines indicate faster repayment rates
+        - Flatter lines suggest slower repayment progression
+        """)
 
 except Exception as e:
     st.error(f"An error occurred: {str(e)}")
