@@ -45,13 +45,13 @@ def load_portfolio_risk():
     credentials = get_credentials()
     query = """
     WITH dates AS (
-        SELECT DISTINCT cohort_month as date
+        SELECT DISTINCT date
         FROM `gold.fact_portfolio_risk`
         ORDER BY date
     ),
     monthly_stats AS (
         SELECT 
-            cohort_month as date,
+            date,
             default_rate,
             npl_ratio,
             avg_max_days_late,
@@ -60,9 +60,10 @@ def load_portfolio_risk():
             fully_paid_delayed_amount,
             overdue_amount,
             npl_amount,
-            total_portfolio_value
+            total_portfolio_value,
+            late_within_30_count,
+            total_payments
         FROM `gold.fact_portfolio_risk`
-        WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM `gold.fact_portfolio_risk`)  -- Get latest snapshot
     )
     SELECT 
         d.date,
