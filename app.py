@@ -85,7 +85,7 @@ try:
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            total_loans = len(df_loan['loan_id'].unique())
+            total_loans = len(df_loan['asset_id'].unique())
             st.metric("Total Loans", f"{total_loans:,}")
             
         with col2:
@@ -93,7 +93,7 @@ try:
             st.metric("Total Borrowers", f"{total_borrowers:,}")
             
         with col3:
-            total_amount = df_loan['loan_amount'].sum()
+            total_amount = df_loan['original_amount'].sum()
             st.metric("Total Loan Amount", f"R$ {total_amount:,.2f}")
             
         with col4:
@@ -115,7 +115,7 @@ try:
         
         with col1:
             st.subheader("Loans by Industry")
-            industry_dist = df_loan.groupby('industry_sector')['loan_amount'].sum().sort_values(ascending=True)
+            industry_dist = df_loan.groupby('industry_sector')['original_amount'].sum().sort_values(ascending=True)
             fig_industry = px.bar(
                 x=industry_dist.values,
                 y=industry_dist.index,
@@ -127,7 +127,7 @@ try:
             
         with col2:
             st.subheader("Geographic Distribution")
-            state_dist = df_loan.groupby('state_code')['loan_amount'].sum().sort_values(ascending=False)
+            state_dist = df_loan.groupby('state_code')['original_amount'].sum().sort_values(ascending=False)
             fig_geo = px.bar(
                 x=state_dist.index,
                 y=state_dist.values,
@@ -138,7 +138,7 @@ try:
 
         # Add Company Size Distribution
         st.subheader("Company Size Distribution")
-        size_dist = df_loan.groupby('company_size')['loan_amount'].sum().sort_values(ascending=True)
+        size_dist = df_loan.groupby('company_size')['original_amount'].sum().sort_values(ascending=True)
         fig_size = px.bar(
             x=size_dist.values,
             y=size_dist.index,
@@ -150,7 +150,7 @@ try:
 
         # Add Risk Category Distribution
         st.subheader("Risk Category Distribution")
-        risk_dist = df_loan.groupby('risk_category')['loan_amount'].sum().sort_values(ascending=True)
+        risk_dist = df_loan.groupby('risk_category')['original_amount'].sum().sort_values(ascending=True)
         fig_risk = px.bar(
             x=risk_dist.values,
             y=risk_dist.index,
