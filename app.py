@@ -219,6 +219,9 @@ try:
         # Load data
         df_payment = load_payment_performance()
         
+        # Convert date column to datetime and format it
+        df_payment['date'] = pd.to_datetime(df_payment['date']).dt.strftime('%Y-%m-%d')
+        
         # Payment Status Timeline
         st.subheader("Payment Status Over Time")
         
@@ -237,7 +240,11 @@ try:
             fig_count.update_layout(
                 xaxis_title="Date",
                 yaxis_title="Number of Loans",
-                hovermode='x unified'
+                hovermode='x unified',
+                xaxis=dict(
+                    type='category',  # Force categorical x-axis
+                    tickformat='%Y-%m-%d'  # Format dates as YYYY-MM-DD
+                )
             )
             st.plotly_chart(fig_count, use_container_width=True)
         
@@ -254,7 +261,11 @@ try:
                 xaxis_title="Date",
                 yaxis_title="Percentage of Portfolio Value (%)",
                 hovermode='x unified',
-                yaxis_range=[0, 100]  # Force y-axis to show full percentage range
+                yaxis_range=[0, 100],  # Force y-axis to show full percentage range
+                xaxis=dict(
+                    type='category',  # Force categorical x-axis
+                    tickformat='%Y-%m-%d'  # Format dates as YYYY-MM-DD
+                )
             )
             st.plotly_chart(fig_amount, use_container_width=True)
         
