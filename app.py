@@ -234,36 +234,43 @@ try:
                 SUM(CASE WHEN is_default = 1 THEN total_expected_amount END) as defaulted_value,
                 AVG(CASE WHEN is_default = 1 THEN max_days_late END) as avg_days_to_default
             FROM `credix-analytics.gold.fact_payment_performance`
+            WHERE last_due_date IS NOT NULL
             GROUP BY last_due_date, cohort_month
+            HAVING total_loans > 0  -- Ensure we only get meaningful data points
         )
         SELECT
             analysis_date,
             cohort_month,
             total_loans,
-            defaulted_loans,
+            COALESCE(defaulted_loans, 0) as defaulted_loans,
             total_portfolio_value,
-            defaulted_value,
-            avg_days_to_default,
-            SAFE_DIVIDE(defaulted_loans, total_loans) as default_rate,
-            SAFE_DIVIDE(defaulted_value, total_portfolio_value) as default_rate_by_value
+            COALESCE(defaulted_value, 0) as defaulted_value,
+            COALESCE(avg_days_to_default, 0) as avg_days_to_default,
+            COALESCE(SAFE_DIVIDE(defaulted_loans, total_loans), 0) as default_rate,
+            COALESCE(SAFE_DIVIDE(defaulted_value, total_portfolio_value), 0) as default_rate_by_value
         FROM default_metrics
         ORDER BY analysis_date DESC, cohort_month DESC
+        LIMIT 1000  -- Add reasonable limit to avoid processing too much data
         """
         df = pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
+        
+        if df.empty:
+            st.warning("No default rate data available.")
+            return
         
         # KPI metrics row
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            latest_default_rate = df.iloc[0]['default_rate'] * 100
+            latest_default_rate = df.iloc[0]['default_rate'] * 100 if len(df) > 0 else 0.0
             st.metric("Current Default Rate", f"{latest_default_rate:.2f}%")
             
         with col2:
-            latest_value_default = df.iloc[0]['default_rate_by_value'] * 100
+            latest_value_default = df.iloc[0]['default_rate_by_value'] * 100 if len(df) > 0 else 0.0
             st.metric("Default Rate by Value", f"{latest_value_default:.2f}%")
             
         with col3:
-            avg_days = df.iloc[0]['avg_days_to_default']
+            avg_days = df.iloc[0]['avg_days_to_default'] if len(df) > 0 else 0
             st.metric("Avg Days to Default", f"{avg_days:.0f} days")
 
         # Default Rate Trend
