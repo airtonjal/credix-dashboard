@@ -501,7 +501,7 @@ try:
         df_selected = df_cohort[df_cohort['cohort_month_str'].isin(selected_cohorts)]
         
         # Create tabs for different analyses
-        tab1, tab2 = st.tabs(["Default Rate Evolution", "Payment Rate Evolution"])
+        tab1, tab2 = st.tabs(["Remaining Balance Rate Evolution", "Fully Paid Loans Evolution"])
         
         with tab1:
             # Create line plot for default rate evolution
@@ -520,9 +520,9 @@ try:
                 )
             
             fig_default.update_layout(
-                title="Default Rate Evolution by Cohort",
+                title="Remaining Balance Rate Evolution by Cohort",
                 xaxis_title="Days Since Origination",
-                yaxis_title="Default Rate (%)",
+                yaxis_title="Remaining Balance Rate (%)",
                 plot_bgcolor='white',
                 paper_bgcolor='white',
                 yaxis=dict(
@@ -556,9 +556,9 @@ try:
                 )
             
             fig_payment.update_layout(
-                title="Payment Rate Evolution by Cohort",
+                title="Fully Paid Loans Evolution by Cohort",
                 xaxis_title="Days Since Origination",
-                yaxis_title="Payment Rate (%)",
+                yaxis_title="Fully Paid Loans (%)",
                 plot_bgcolor='white',
                 paper_bgcolor='white',
                 yaxis=dict(
@@ -592,13 +592,13 @@ try:
             
             with col2:
                 st.metric(
-                    "Current Default Rate",
+                    "Remaining Balance Rate",
                     f"{cohort_data['default_rate']:.1f}%"
                 )
             
             with col3:
                 st.metric(
-                    "Current Payment Rate",
+                    "Fully Paid Loans",
                     f"{cohort_data['paid_rate']:.1f}%"
                 )
         
@@ -606,14 +606,14 @@ try:
         st.markdown("""
         **Understanding the Analysis:**
         
-        1. **Default Rate Evolution:**
+        1. **Remaining Balance Rate Evolution:**
            - Each line represents a cohort of loans originated in a specific month
            - The x-axis shows days since the cohort's origination
-           - The y-axis shows the default rate (percentage of expected amount not yet paid)
-           - Default rates typically decrease over time as payments are made
-           - Higher lines indicate worse performance (higher default rates)
+           - The y-axis shows the percentage of expected amount not yet paid
+           - The rate should increase over time as some loans become overdue
+           - Higher lines indicate worse performance (more unpaid amounts)
            
-        2. **Payment Rate Evolution:**
+        2. **Fully Paid Loans Evolution:**
            - Shows the percentage of loans in each cohort that have been fully paid
            - Higher percentages indicate better payment performance
            - The trend should generally increase over time as more loans are paid off
