@@ -219,7 +219,7 @@ try:
         st.plotly_chart(fig_risk, use_container_width=True)
 
     elif page == "Risk Analysis":
-        st.title("Portfolio Default Rate Analysis")
+        # Remove both titles
         
         # Load data
         credentials = get_credentials()
