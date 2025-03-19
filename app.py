@@ -463,36 +463,42 @@ try:
         def load_cohort_data():
             credentials = get_credentials()
             query = """
-            WITH payment_data AS (
+            WITH latest_snapshot AS (
+                SELECT MAX(snapshot_date) as max_date
+                FROM `gold.fact_payment_performance`
+            ),
+            base_data AS (
                 SELECT 
                     asset_id,
                     DATE_TRUNC(CAST(first_issue_date AS DATE), MONTH) as cohort_month,
-                    payment_status,
-                    total_original_amount,
+                    CAST(last_due_date AS DATE) as last_due_date,
                     total_expected_amount,
                     total_paid_amount,
-                    CAST(snapshot_date AS DATE) as snapshot_date
+                    payment_status
                 FROM `gold.fact_payment_performance`
+                WHERE snapshot_date = (SELECT max_date FROM latest_snapshot)
             ),
-            cohort_progression AS (
+            monthly_progression AS (
                 SELECT 
-                    pd.cohort_month,
-                    pd.snapshot_date,
-                    DATE_DIFF(pd.snapshot_date, pd.cohort_month, MONTH) as months_since_origination,
-                    COUNT(DISTINCT pd.asset_id) as total_loans,
-                    SUM(CASE WHEN pd.payment_status IN ('FULLY_PAID_ON_TIME', 'FULLY_PAID_WITH_DELAYS') 
-                        THEN pd.total_paid_amount ELSE 0 END) as paid_amount,
-                    SUM(pd.total_expected_amount) as expected_amount
-                FROM payment_data pd
-                GROUP BY cohort_month, snapshot_date
+                    cohort_month,
+                    last_due_date,
+                    DATE_DIFF(last_due_date, cohort_month, MONTH) as months_since_origination,
+                    COUNT(DISTINCT asset_id) as total_loans,
+                    SUM(total_paid_amount) as total_paid,
+                    SUM(total_expected_amount) as total_expected,
+                    COUNT(CASE WHEN payment_status IN ('FULLY_PAID_ON_TIME', 'FULLY_PAID_WITH_DELAYS') THEN 1 END) as completed_loans
+                FROM base_data
+                GROUP BY cohort_month, last_due_date
             )
             SELECT 
                 cohort_month,
                 months_since_origination,
-                ROUND(paid_amount / NULLIF(expected_amount, 0) * 100, 2) as completion_rate,
+                ROUND(total_paid / NULLIF(total_expected, 0) * 100, 2) as completion_rate,
+                ROUND(completed_loans / NULLIF(total_loans, 0) * 100, 2) as loans_completed_pct,
                 total_loans
-            FROM cohort_progression
+            FROM monthly_progression
             WHERE months_since_origination >= 0
+              AND cohort_month >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)  -- Last 12 months of cohorts
             ORDER BY cohort_month, months_since_origination
             """
             return pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
@@ -525,14 +531,18 @@ try:
                 range=[0, 100],
                 gridcolor='lightgrey',
                 gridwidth=0.5,
-                tickformat='.0f'
+                tickformat='.0f',
+                zeroline=True,
+                zerolinecolor='lightgrey'
             ),
             xaxis=dict(
                 gridcolor='lightgrey',
                 gridwidth=0.5,
                 tickmode='linear',
                 dtick=1,
-                tickangle=0
+                tickangle=0,
+                zeroline=True,
+                zerolinecolor='lightgrey'
             ),
             legend=dict(
                 yanchor="top",
@@ -548,7 +558,7 @@ try:
         fig_survival.update_traces(
             line=dict(width=1.5),
             opacity=0.7,
-            hovertemplate='%{y:.1f}%'
+            hovertemplate='Completion Rate: %{y:.1f}%<br>Months: %{x}<extra></extra>'
         )
         
         st.plotly_chart(fig_survival, use_container_width=True)
