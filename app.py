@@ -30,9 +30,11 @@ def load_loan_performance():
     query = """
     SELECT 
         lp.*,
-        b.company_name,
-        b.industry_sector,
-        b.state_code
+        b.buyer_tax_id as company_id,
+        b.main_cnae as industry_sector,
+        b.uf as state_code,
+        b.company_size,
+        b.risk_category
     FROM `gold.fact_loan_performance` lp
     JOIN `gold.dim_borrower` b ON lp.borrower_key = b.borrower_key
     """
@@ -54,9 +56,11 @@ def load_payment_performance():
     query = """
     SELECT 
         pp.*,
-        b.company_name,
-        b.industry_sector,
-        b.state_code
+        b.buyer_tax_id as company_id,
+        b.main_cnae as industry_sector,
+        b.uf as state_code,
+        b.company_size,
+        b.risk_category
     FROM `gold.fact_payment_performance` pp
     JOIN `gold.dim_borrower` b ON pp.borrower_key = b.borrower_key
     """
@@ -116,9 +120,9 @@ try:
                 x=industry_dist.values,
                 y=industry_dist.index,
                 orientation='h',
-                title="Total Loan Amount by Industry"
+                title="Total Loan Amount by Industry (CNAE)"
             )
-            fig_industry.update_layout(yaxis_title="Industry", xaxis_title="Total Loan Amount (R$)")
+            fig_industry.update_layout(yaxis_title="Industry (CNAE)", xaxis_title="Total Loan Amount (R$)")
             st.plotly_chart(fig_industry, use_container_width=True)
             
         with col2:
@@ -127,10 +131,34 @@ try:
             fig_geo = px.bar(
                 x=state_dist.index,
                 y=state_dist.values,
-                title="Total Loan Amount by State"
+                title="Total Loan Amount by State (UF)"
             )
-            fig_geo.update_layout(xaxis_title="State", yaxis_title="Total Loan Amount (R$)")
+            fig_geo.update_layout(xaxis_title="State (UF)", yaxis_title="Total Loan Amount (R$)")
             st.plotly_chart(fig_geo, use_container_width=True)
+
+        # Add Company Size Distribution
+        st.subheader("Company Size Distribution")
+        size_dist = df_loan.groupby('company_size')['loan_amount'].sum().sort_values(ascending=True)
+        fig_size = px.bar(
+            x=size_dist.values,
+            y=size_dist.index,
+            orientation='h',
+            title="Total Loan Amount by Company Size"
+        )
+        fig_size.update_layout(yaxis_title="Company Size", xaxis_title="Total Loan Amount (R$)")
+        st.plotly_chart(fig_size, use_container_width=True)
+
+        # Add Risk Category Distribution
+        st.subheader("Risk Category Distribution")
+        risk_dist = df_loan.groupby('risk_category')['loan_amount'].sum().sort_values(ascending=True)
+        fig_risk = px.bar(
+            x=risk_dist.values,
+            y=risk_dist.index,
+            orientation='h',
+            title="Total Loan Amount by Risk Category"
+        )
+        fig_risk.update_layout(yaxis_title="Risk Category", xaxis_title="Total Loan Amount (R$)")
+        st.plotly_chart(fig_risk, use_container_width=True)
 
     elif page == "Risk Analysis":
         st.title("Risk Analysis")
