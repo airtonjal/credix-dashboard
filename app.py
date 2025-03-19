@@ -470,11 +470,11 @@ try:
             cohort_metrics AS (
                 SELECT 
                     cohort_month,
-                    DATE_DIFF(snapshot_date, cohort_month, MONTH) as cohort_age_months,
+                    DATE_DIFF(CAST(snapshot_date AS DATE), CAST(cohort_month AS DATE), MONTH) as cohort_age_months,
                     COUNT(DISTINCT asset_id) as total_loans,
                     COUNT(CASE WHEN payment_status IN ('FULLY_PAID_ON_TIME', 'FULLY_PAID_WITH_DELAYS') THEN 1 END) as completed_loans,
                     AVG(CASE WHEN payment_status IN ('FULLY_PAID_ON_TIME', 'FULLY_PAID_WITH_DELAYS') 
-                        THEN TIMESTAMP_DIFF(CAST(last_due_date AS TIMESTAMP), CAST(first_issue_date AS TIMESTAMP), DAY)
+                        THEN DATE_DIFF(CAST(last_due_date AS DATE), CAST(first_issue_date AS DATE), DAY)
                         END) as avg_days_to_completion,
                     AVG(CASE WHEN max_days_late > 0 THEN max_days_late END) as avg_days_late
                 FROM `gold.fact_payment_performance`
