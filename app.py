@@ -256,69 +256,68 @@ try:
         
         if df.empty:
             st.warning("No default rate data available.")
-            return
-        
-        # KPI metrics row
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            latest_default_rate = df.iloc[0]['default_rate'] * 100 if len(df) > 0 else 0.0
-            st.metric("Current Default Rate", f"{latest_default_rate:.2f}%")
+        else:
+            # KPI metrics row
+            col1, col2, col3 = st.columns(3)
             
-        with col2:
-            latest_value_default = df.iloc[0]['default_rate_by_value'] * 100 if len(df) > 0 else 0.0
-            st.metric("Default Rate by Value", f"{latest_value_default:.2f}%")
+            with col1:
+                latest_default_rate = df.iloc[0]['default_rate'] * 100
+                st.metric("Current Default Rate", f"{latest_default_rate:.2f}%")
+                
+            with col2:
+                latest_value_default = df.iloc[0]['default_rate_by_value'] * 100
+                st.metric("Default Rate by Value", f"{latest_value_default:.2f}%")
+                
+            with col3:
+                avg_days = df.iloc[0]['avg_days_to_default']
+                st.metric("Avg Days to Default", f"{avg_days:.0f} days")
+
+            # Default Rate Trend
+            st.subheader("Default Rate Trend")
+            fig_trend = go.Figure()
             
-        with col3:
-            avg_days = df.iloc[0]['avg_days_to_default'] if len(df) > 0 else 0
-            st.metric("Avg Days to Default", f"{avg_days:.0f} days")
-
-        # Default Rate Trend
-        st.subheader("Default Rate Trend")
-        fig_trend = go.Figure()
-        
-        fig_trend.add_trace(
-            go.Scatter(
-                x=df['analysis_date'],
-                y=df['default_rate'] * 100,
-                name='Default Rate (%)',
-                line=dict(color='red')
+            fig_trend.add_trace(
+                go.Scatter(
+                    x=df['analysis_date'],
+                    y=df['default_rate'] * 100,
+                    name='Default Rate (%)',
+                    line=dict(color='red')
+                )
             )
-        )
-        
-        fig_trend.add_trace(
-            go.Scatter(
-                x=df['analysis_date'],
-                y=df['default_rate_by_value'] * 100,
-                name='Default Rate by Value (%)',
-                line=dict(color='orange')
+            
+            fig_trend.add_trace(
+                go.Scatter(
+                    x=df['analysis_date'],
+                    y=df['default_rate_by_value'] * 100,
+                    name='Default Rate by Value (%)',
+                    line=dict(color='orange')
+                )
             )
-        )
-        
-        fig_trend.update_layout(
-            title="Default Rate Over Time",
-            xaxis_title="Date",
-            yaxis_title="Default Rate (%)",
-            hovermode='x unified'
-        )
-        st.plotly_chart(fig_trend, use_container_width=True)
+            
+            fig_trend.update_layout(
+                title="Default Rate Over Time",
+                xaxis_title="Date",
+                yaxis_title="Default Rate (%)",
+                hovermode='x unified'
+            )
+            st.plotly_chart(fig_trend, use_container_width=True)
 
-        # Cohort Analysis
-        st.subheader("Default Rate by Cohort")
-        cohort_matrix = df.pivot(
-            index='analysis_date',
-            columns='cohort_month',
-            values='default_rate'
-        ) * 100
+            # Cohort Analysis
+            st.subheader("Default Rate by Cohort")
+            cohort_matrix = df.pivot(
+                index='analysis_date',
+                columns='cohort_month',
+                values='default_rate'
+            ) * 100
 
-        fig_cohort = px.imshow(
-            cohort_matrix,
-            title="Default Rate by Cohort (%)",
-            labels=dict(x="Cohort Month", y="Analysis Date", color="Default Rate (%)"),
-            color_continuous_scale="Reds",
-            aspect="auto"
-        )
-        st.plotly_chart(fig_cohort, use_container_width=True)
+            fig_cohort = px.imshow(
+                cohort_matrix,
+                title="Default Rate by Cohort (%)",
+                labels=dict(x="Cohort Month", y="Analysis Date", color="Default Rate (%)"),
+                color_continuous_scale="Reds",
+                aspect="auto"
+            )
+            st.plotly_chart(fig_cohort, use_container_width=True)
 
     elif page == "Payment Behavior":
         st.title("Payment Behavior Analysis")
