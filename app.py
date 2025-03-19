@@ -66,8 +66,15 @@ def load_portfolio_risk():
 def load_payment_performance():
     credentials = get_credentials()
     query = """
-    WITH latest_snapshot AS (
-        SELECT MAX(snapshot_date) as latest_date
+    WITH latest_data AS (
+        SELECT 
+            asset_id,
+            due_date,
+            payment_status,
+            total_original_amount,
+            total_expected_amount,
+            total_paid_amount,
+            ROW_NUMBER() OVER (PARTITION BY asset_id ORDER BY due_date DESC) as rn
         FROM `gold.fact_payment_performance`
     ),
     current_status AS (
@@ -75,18 +82,18 @@ def load_payment_performance():
             payment_status,
             COUNT(*) as count,
             SUM(total_original_amount) as total_amount
-        FROM `gold.fact_payment_performance`
-        WHERE snapshot_date = (SELECT latest_date FROM latest_snapshot)
+        FROM latest_data
+        WHERE rn = 1  -- Get only the latest record for each asset
         GROUP BY payment_status
     ),
     historical_stats AS (
         SELECT 
-            DATE(last_due_date) as date,
+            DATE(due_date) as date,
             payment_status,
             COUNT(*) as count,
             SUM(total_original_amount) as total_amount
         FROM `gold.fact_payment_performance`
-        GROUP BY DATE(last_due_date), payment_status
+        GROUP BY DATE(due_date), payment_status
     )
     SELECT 
         'CURRENT' as date,
@@ -215,158 +222,95 @@ try:
         st.title("Portfolio Default Rate Analysis")
         
         # Load data
-        df_risk = load_portfolio_risk()
+        credentials = get_credentials()
+        query = """
+        WITH default_metrics AS (
+            SELECT
+                due_date as analysis_date,
+                cohort_month,
+                COUNT(DISTINCT asset_id) as total_loans,
+                COUNT(DISTINCT CASE WHEN is_default = 1 THEN asset_id END) as defaulted_loans,
+                SUM(total_expected_amount) as total_portfolio_value,
+                SUM(CASE WHEN is_default = 1 THEN total_expected_amount END) as defaulted_value,
+                AVG(CASE WHEN is_default = 1 THEN max_days_late END) as avg_days_to_default
+            FROM `credix-analytics.gold.fact_payment_performance`
+            GROUP BY due_date, cohort_month
+        )
+        SELECT
+            analysis_date,
+            cohort_month,
+            total_loans,
+            defaulted_loans,
+            total_portfolio_value,
+            defaulted_value,
+            avg_days_to_default,
+            SAFE_DIVIDE(defaulted_loans, total_loans) as default_rate,
+            SAFE_DIVIDE(defaulted_value, total_portfolio_value) as default_rate_by_value
+        FROM default_metrics
+        ORDER BY analysis_date DESC, cohort_month DESC
+        """
+        df = pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
         
-        # Create two columns for different delinquency rates
-        col1, col2 = st.columns(2)
+        # KPI metrics row
+        col1, col2, col3 = st.columns(3)
         
         with col1:
-            # 15-90 days delinquency (using late payment metrics)
-            fig_early_default = go.Figure()
+            latest_default_rate = df.iloc[0]['default_rate'] * 100
+            st.metric("Current Default Rate", f"{latest_default_rate:.2f}%")
             
-            # Calculate early delinquency rate (15-90 days)
-            early_delinq = df_risk['late_within_30_count'] / df_risk['total_payments'] * 100
-            
-            fig_early_default.add_trace(
-                go.Scatter(
-                    x=df_risk['last_due_date'].dt.strftime('%Y-%m-%d'),
-                    y=early_delinq,
-                    mode='lines+markers',
-                    name='15-90 days',
-                    line=dict(color='#9B51E0', width=2),
-                    marker=dict(size=6)
-                )
-            )
-            
-            fig_early_default.update_layout(
-                title="15-90 Days Delinquency Rate",
-                xaxis_title="",
-                yaxis_title="Rate (%)",
-                hovermode='x unified',
-                plot_bgcolor='white',
-                yaxis=dict(
-                    tickformat='.1f',
-                    gridcolor='lightgrey',
-                    range=[0, max(early_delinq) * 1.2]  # Add 20% padding
-                ),
-                xaxis=dict(
-                    type='category',
-                    tickangle=-45,
-                    gridcolor='lightgrey'
-                )
-            )
-            st.plotly_chart(fig_early_default, use_container_width=True)
-        
         with col2:
-            # 90+ days delinquency (NPL ratio)
-            fig_npl = go.Figure()
+            latest_value_default = df.iloc[0]['default_rate_by_value'] * 100
+            st.metric("Default Rate by Value", f"{latest_value_default:.2f}%")
             
-            # Convert NPL ratio to percentage
-            npl_pct = df_risk['npl_ratio'] * 100
-            
-            fig_npl.add_trace(
-                go.Scatter(
-                    x=df_risk['last_due_date'].dt.strftime('%Y-%m-%d'),
-                    y=npl_pct,
-                    mode='lines+markers',
-                    name='90+ days',
-                    line=dict(color='#9B51E0', width=2),
-                    marker=dict(size=6)
-                )
-            )
-            
-            fig_npl.update_layout(
-                title="90+ Days Delinquency Rate (NPL)",
-                xaxis_title="",
-                yaxis_title="Rate (%)",
-                hovermode='x unified',
-                plot_bgcolor='white',
-                yaxis=dict(
-                    tickformat='.1f',
-                    gridcolor='lightgrey',
-                    range=[0, max(npl_pct) * 1.2]  # Add 20% padding
-                ),
-                xaxis=dict(
-                    type='category',
-                    tickangle=-45,
-                    gridcolor='lightgrey'
-                )
-            )
-            st.plotly_chart(fig_npl, use_container_width=True)
+        with col3:
+            avg_days = df.iloc[0]['avg_days_to_default']
+            st.metric("Avg Days to Default", f"{avg_days:.0f} days")
+
+        # Default Rate Trend
+        st.subheader("Default Rate Trend")
+        fig_trend = go.Figure()
         
-        # Portfolio Composition
-        st.subheader("Portfolio Composition")
-        
-        # Calculate percentages for each category
-        df_risk['on_time_pct'] = df_risk['fully_paid_on_time_amount'] / df_risk['total_portfolio_value'] * 100
-        df_risk['delayed_pct'] = df_risk['fully_paid_delayed_amount'] / df_risk['total_portfolio_value'] * 100
-        df_risk['overdue_pct'] = df_risk['overdue_amount'] / df_risk['total_portfolio_value'] * 100
-        df_risk['npl_pct'] = df_risk['npl_amount'] / df_risk['total_portfolio_value'] * 100
-        
-        fig_composition = go.Figure()
-        
-        categories = [
-            ('on_time_pct', 'Paid On Time'),
-            ('delayed_pct', 'Paid with Delay'),
-            ('overdue_pct', 'Overdue'),
-            ('npl_pct', 'NPL')
-        ]
-        
-        for col, name in categories:
-            fig_composition.add_trace(
-                go.Scatter(
-                    x=df_risk['last_due_date'].dt.strftime('%Y-%m-%d'),
-                    y=df_risk[col],
-                    name=name,
-                    stackgroup='one',
-                    hovertemplate="%{y:.1f}%<extra></extra>"
-                )
-            )
-        
-        fig_composition.update_layout(
-            title="Portfolio Composition Over Time",
-            xaxis_title="Date",
-            yaxis_title="Percentage of Portfolio",
-            hovermode='x unified',
-            yaxis_range=[0, 100],
-            yaxis_ticksuffix='%',
-            xaxis=dict(
-                type='category',  # Force categorical x-axis
-                tickangle=-45,  # Angle the dates for better readability
-                dtick=1  # Show all dates
+        fig_trend.add_trace(
+            go.Scatter(
+                x=df['analysis_date'],
+                y=df['default_rate'] * 100,
+                name='Default Rate (%)',
+                line=dict(color='red')
             )
         )
-        st.plotly_chart(fig_composition, use_container_width=True)
         
+        fig_trend.add_trace(
+            go.Scatter(
+                x=df['analysis_date'],
+                y=df['default_rate_by_value'] * 100,
+                name='Default Rate by Value (%)',
+                line=dict(color='orange')
+            )
+        )
+        
+        fig_trend.update_layout(
+            title="Default Rate Over Time",
+            xaxis_title="Date",
+            yaxis_title="Default Rate (%)",
+            hovermode='x unified'
+        )
+        st.plotly_chart(fig_trend, use_container_width=True)
+
         # Cohort Analysis
-        st.subheader("Cohort Analysis")
-        
-        # Convert cohort_month to datetime for better display
-        df_risk['cohort_month'] = pd.to_datetime(df_risk['cohort_month'])
-        
-        cohort_matrix = df_risk.pivot(
-            index='last_due_date',
+        st.subheader("Default Rate by Cohort")
+        cohort_matrix = df.pivot(
+            index='analysis_date',
             columns='cohort_month',
             values='default_rate'
-        )
-        
+        ) * 100
+
         fig_cohort = px.imshow(
             cohort_matrix,
-            title="Default Rate by Cohort",
-            labels=dict(
-                x="Cohort Month",
-                y="Snapshot Date",
-                color="Default Rate"
-            ),
-            aspect="auto",
-            color_continuous_scale="RdYlBu_r"
+            title="Default Rate by Cohort (%)",
+            labels=dict(x="Cohort Month", y="Analysis Date", color="Default Rate (%)"),
+            color_continuous_scale="Reds",
+            aspect="auto"
         )
-        
-        # Format the values as percentages
-        fig_cohort.update_traces(
-            hovertemplate="Cohort Month: %{x}<br>Snapshot Date: %{y}<br>Default Rate: %{z:.2%}<extra></extra>"
-        )
-        
         st.plotly_chart(fig_cohort, use_container_width=True)
 
     elif page == "Payment Behavior":
