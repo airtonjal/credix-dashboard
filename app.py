@@ -417,76 +417,55 @@ try:
             WITH base_data AS (
                 SELECT 
                     asset_id,
-                    DATE_TRUNC(DATE(first_issue_date), MONTH) as cohort_date,
-                    DATE(last_due_date) as last_due_date,
+                    DATE_TRUNC(DATE(first_issue_date), MONTH) as cohort_month,
+                    DATE_TRUNC(DATE(last_due_date), MONTH) as analysis_month,
                     total_expected_amount,
                     total_paid_amount,
                     payment_status,
                     CASE 
-                        WHEN payment_status IN ('FULLY_PAID_ON_TIME', 'FULLY_PAID_WITH_DELAYS') THEN 
-                            CASE 
-                                WHEN total_paid_amount > 0 THEN 'PAID'
-                                ELSE 'PAID_ZERO_AMOUNT'
-                            END
-                        ELSE 
-                            CASE 
-                                WHEN DATE(last_due_date) < CURRENT_DATE() THEN 'OVERDUE'
-                                ELSE 'PENDING'
-                            END
-                    END as detailed_payment_status
+                        WHEN payment_status IN ('FULLY_PAID_ON_TIME', 'FULLY_PAID_WITH_DELAYS') THEN 1
+                        ELSE 0
+                    END as is_paid
                 FROM `credix-analytics.gold.fact_payment_performance`
-                WHERE last_due_date IS NOT NULL
-                  AND first_issue_date IS NOT NULL
+                WHERE first_issue_date IS NOT NULL
+                  AND last_due_date IS NOT NULL
             ),
-            daily_progression AS (
+            monthly_stats AS (
                 SELECT 
-                    cohort_date,
-                    DATE_TRUNC(last_due_date, MONTH) as analysis_date,
-                    DATE_DIFF(last_due_date, cohort_date, DAY) as days_since_origination,
+                    cohort_month,
+                    analysis_month,
+                    DATE_DIFF(analysis_month, cohort_month, MONTH) as months_since_origination,
                     COUNT(DISTINCT asset_id) as total_loans,
-                    SUM(total_paid_amount) as total_paid,
-                    SUM(total_expected_amount) as total_expected,
-                    COUNT(CASE WHEN payment_status IN ('FULLY_PAID_ON_TIME', 'FULLY_PAID_WITH_DELAYS') THEN 1 END) as completed_loans,
-                    COUNT(CASE WHEN detailed_payment_status = 'PAID' THEN 1 END) as paid_loans,
-                    COUNT(CASE WHEN detailed_payment_status = 'PAID_ZERO_AMOUNT' THEN 1 END) as paid_zero_amount_loans,
-                    COUNT(CASE WHEN detailed_payment_status = 'OVERDUE' THEN 1 END) as overdue_loans,
-                    COUNT(CASE WHEN detailed_payment_status = 'PENDING' THEN 1 END) as pending_loans,
-                    AVG(CASE WHEN detailed_payment_status = 'PAID' THEN total_paid_amount / NULLIF(total_expected_amount, 0) * 100 END) as avg_payment_ratio
+                    SUM(total_paid_amount) as cumulative_paid_amount,
+                    SUM(total_expected_amount) as total_expected_amount,
+                    COUNTIF(is_paid = 1) as paid_loans
                 FROM base_data
-                GROUP BY cohort_date, analysis_date, days_since_origination
+                GROUP BY cohort_month, analysis_month, months_since_origination
             )
             SELECT 
-                cohort_date,
-                days_since_origination,
-                100 - ROUND(SUM(total_paid) / NULLIF(SUM(total_expected), 0) * 100, 2) as default_rate,
-                ROUND(SUM(completed_loans) / NULLIF(SUM(total_loans), 0) * 100, 2) as loans_completed_pct,
-                ROUND(SUM(paid_loans) / NULLIF(SUM(total_loans), 0) * 100, 2) as paid_loans_pct,
-                ROUND(SUM(paid_zero_amount_loans) / NULLIF(SUM(total_loans), 0) * 100, 2) as paid_zero_amount_pct,
-                ROUND(SUM(overdue_loans) / NULLIF(SUM(total_loans), 0) * 100, 2) as overdue_loans_pct,
-                ROUND(SUM(pending_loans) / NULLIF(SUM(total_loans), 0) * 100, 2) as pending_loans_pct,
-                ROUND(AVG(avg_payment_ratio), 2) as avg_payment_ratio,
-                SUM(total_loans) as total_loans
-            FROM daily_progression
-            WHERE days_since_origination >= 0
-              AND cohort_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)
-            GROUP BY cohort_date, days_since_origination
-            ORDER BY cohort_date, days_since_origination
+                cohort_month,
+                months_since_origination,
+                total_loans,
+                ROUND(100 * (1 - SAFE_DIVIDE(cumulative_paid_amount, total_expected_amount)), 2) as default_rate,
+                ROUND(100 * SAFE_DIVIDE(paid_loans, total_loans), 2) as paid_rate
+            FROM monthly_stats
+            WHERE cohort_month >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)
+            ORDER BY cohort_month, months_since_origination
             """
             return pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
 
         df_cohort = load_cohort_data()
         
-        # Format dates for better display and calculate cohort age
-        df_cohort['cohort_date'] = pd.to_datetime(df_cohort['cohort_date'])
-        df_cohort['cohort_age'] = (pd.Timestamp.now() - df_cohort['cohort_date']).dt.days
-        df_cohort['cohort_date_str'] = df_cohort['cohort_date'].dt.strftime('%Y-%m-%d')
+        # Format dates for better display
+        df_cohort['cohort_month'] = pd.to_datetime(df_cohort['cohort_month'])
+        df_cohort['cohort_month_str'] = df_cohort['cohort_month'].dt.strftime('%Y-%m')
         
         # Add cohort selection
         st.subheader("Cohort Selection")
         selected_cohorts = st.multiselect(
             "Select cohorts to analyze",
-            options=sorted(df_cohort['cohort_date_str'].unique()),
-            default=sorted(df_cohort['cohort_date_str'].unique())[-3:]  # Default to last 3 cohorts
+            options=sorted(df_cohort['cohort_month_str'].unique()),
+            default=sorted(df_cohort['cohort_month_str'].unique())[-3:]  # Default to last 3 cohorts
         )
         
         if not selected_cohorts:
@@ -494,153 +473,129 @@ try:
             st.stop()
             
         # Filter data for selected cohorts
-        df_selected = df_cohort[df_cohort['cohort_date_str'].isin(selected_cohorts)]
+        df_selected = df_cohort[df_cohort['cohort_month_str'].isin(selected_cohorts)]
         
         # Create tabs for different analyses
-        tab1, tab2, tab3 = st.tabs(["Payment Status Evolution", "Payment Ratio Analysis", "Detailed Metrics"])
+        tab1, tab2 = st.tabs(["Default Rate Evolution", "Payment Rate Evolution"])
         
         with tab1:
-            # Create line plot for payment status evolution
-            fig_payment_status = go.Figure()
+            # Create line plot for default rate evolution
+            fig_default = go.Figure()
             
             for cohort in selected_cohorts:
-                cohort_data = df_selected[df_selected['cohort_date_str'] == cohort]
+                cohort_data = df_selected[df_selected['cohort_month_str'] == cohort]
                 
-                # Add traces for different payment status percentages
-                fig_payment_status.add_trace(
+                fig_default.add_trace(
                     go.Scatter(
-                        x=cohort_data['days_since_origination'],
-                        y=cohort_data['paid_loans_pct'],
-                        name=f"{cohort} - Paid",
-                        line=dict(dash='solid')
-                    )
-                )
-                fig_payment_status.add_trace(
-                    go.Scatter(
-                        x=cohort_data['days_since_origination'],
-                        y=cohort_data['paid_zero_amount_pct'],
-                        name=f"{cohort} - Paid (Zero Amount)",
-                        line=dict(dash='dot')
-                    )
-                )
-                fig_payment_status.add_trace(
-                    go.Scatter(
-                        x=cohort_data['days_since_origination'],
-                        y=cohort_data['overdue_loans_pct'],
-                        name=f"{cohort} - Overdue",
-                        line=dict(dash='dash')
+                        x=cohort_data['months_since_origination'],
+                        y=cohort_data['default_rate'],
+                        name=f"Cohort {cohort}",
+                        mode='lines+markers'
                     )
                 )
             
-            fig_payment_status.update_layout(
-                title="Payment Status Evolution by Cohort",
-                xaxis_title="Days Since Origination",
-                yaxis_title="Percentage of Loans (%)",
+            fig_default.update_layout(
+                title="Default Rate Evolution by Cohort",
+                xaxis_title="Months Since Origination",
+                yaxis_title="Default Rate (%)",
                 plot_bgcolor='white',
                 paper_bgcolor='white',
                 yaxis=dict(
                     range=[0, 100],
                     gridcolor='rgba(0,0,0,0.1)',
-                    tickformat='.0f'
+                    tickformat='.1f'
                 ),
                 xaxis=dict(
                     gridcolor='rgba(0,0,0,0.1)',
                     tickmode='linear',
-                    dtick=30
+                    dtick=1
                 ),
                 hovermode='x unified'
             )
-            st.plotly_chart(fig_payment_status, use_container_width=True)
+            st.plotly_chart(fig_default, use_container_width=True)
             
         with tab2:
-            # Create line plot for payment ratio
-            fig_payment_ratio = go.Figure()
+            # Create line plot for payment rate evolution
+            fig_payment = go.Figure()
             
             for cohort in selected_cohorts:
-                cohort_data = df_selected[df_selected['cohort_date_str'] == cohort]
+                cohort_data = df_selected[df_selected['cohort_month_str'] == cohort]
                 
-                fig_payment_ratio.add_trace(
+                fig_payment.add_trace(
                     go.Scatter(
-                        x=cohort_data['days_since_origination'],
-                        y=cohort_data['avg_payment_ratio'],
-                        name=cohort,
-                        line=dict(width=2)
+                        x=cohort_data['months_since_origination'],
+                        y=cohort_data['paid_rate'],
+                        name=f"Cohort {cohort}",
+                        mode='lines+markers'
                     )
                 )
             
-            fig_payment_ratio.update_layout(
-                title="Average Payment Ratio by Cohort",
-                xaxis_title="Days Since Origination",
-                yaxis_title="Average Payment Ratio (%)",
+            fig_payment.update_layout(
+                title="Payment Rate Evolution by Cohort",
+                xaxis_title="Months Since Origination",
+                yaxis_title="Payment Rate (%)",
                 plot_bgcolor='white',
                 paper_bgcolor='white',
                 yaxis=dict(
                     range=[0, 100],
                     gridcolor='rgba(0,0,0,0.1)',
-                    tickformat='.0f'
+                    tickformat='.1f'
                 ),
                 xaxis=dict(
                     gridcolor='rgba(0,0,0,0.1)',
                     tickmode='linear',
-                    dtick=30
+                    dtick=1
                 ),
                 hovermode='x unified'
             )
-            st.plotly_chart(fig_payment_ratio, use_container_width=True)
+            st.plotly_chart(fig_payment, use_container_width=True)
+        
+        # Show detailed metrics for selected cohorts
+        st.subheader("Cohort Details")
+        
+        for cohort in selected_cohorts:
+            st.write(f"**Cohort: {cohort}**")
+            cohort_data = df_selected[df_selected['cohort_month_str'] == cohort].iloc[-1]  # Get latest data point
             
-        with tab3:
-            # Show detailed metrics for selected cohorts
-            st.subheader("Detailed Metrics by Cohort")
+            col1, col2, col3 = st.columns(3)
             
-            for cohort in selected_cohorts:
-                st.write(f"**Cohort: {cohort}**")
-                cohort_data = df_selected[df_selected['cohort_date_str'] == cohort].iloc[-1]  # Get latest data point
-                
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    st.metric(
-                        "Total Loans",
-                        f"{int(cohort_data['total_loans']):,}"
-                    )
-                
-                with col2:
-                    st.metric(
-                        "Paid Loans",
-                        f"{cohort_data['paid_loans_pct']:.1f}%"
-                    )
-                
-                with col3:
-                    st.metric(
-                        "Paid (Zero Amount)",
-                        f"{cohort_data['paid_zero_amount_pct']:.1f}%"
-                    )
-                
-                with col4:
-                    st.metric(
-                        "Overdue Loans",
-                        f"{cohort_data['overdue_loans_pct']:.1f}%"
-                    )
+            with col1:
+                st.metric(
+                    "Total Loans",
+                    f"{int(cohort_data['total_loans']):,}"
+                )
+            
+            with col2:
+                st.metric(
+                    "Current Default Rate",
+                    f"{cohort_data['default_rate']:.1f}%"
+                )
+            
+            with col3:
+                st.metric(
+                    "Current Payment Rate",
+                    f"{cohort_data['paid_rate']:.1f}%"
+                )
         
         # Add explanation of the visualizations
         st.markdown("""
         **Understanding the Analysis:**
         
-        1. **Payment Status Evolution:**
-           - Solid lines show the percentage of loans with actual payments
-           - Dotted lines show loans marked as paid but with zero amount
-           - Dashed lines show overdue loans
+        1. **Default Rate Evolution:**
+           - Each line represents a cohort of loans originated in a specific month
+           - The x-axis shows months since the cohort's origination
+           - The y-axis shows the default rate (percentage of expected amount not yet paid)
+           - Default rates typically decrease over time as payments are made
+           - Higher lines indicate worse performance (higher default rates)
            
-        2. **Payment Ratio Analysis:**
-           - Shows the average ratio of paid amount to expected amount
+        2. **Payment Rate Evolution:**
+           - Shows the percentage of loans in each cohort that have been fully paid
            - Higher percentages indicate better payment performance
+           - The trend should generally increase over time as more loans are paid off
            
-        3. **Detailed Metrics:**
-           - Provides the latest snapshot of key metrics for each cohort
-           - Helps identify patterns in payment behavior and potential issues
-           
-        **Note:** The analysis now accounts for cases where loans are marked as paid but have zero payment amounts, 
-        helping to identify potential data quality issues or special cases in the payment processing.
+        3. **Cohort Details:**
+           - Provides the latest metrics for each cohort
+           - Helps compare the current state of different origination vintages
         """)
 
 except Exception as e:
