@@ -446,20 +446,26 @@ try:
                 SELECT 
                     cohort_month,
                     days_since_origination,
+                    analysis_date,
                     MAX(total_loans) as total_loans,
                     SUM(total_paid_amount) OVER (
                         PARTITION BY cohort_month 
-                        ORDER BY days_since_origination
+                        ORDER BY analysis_date 
                         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
                     ) as cumulative_paid_amount,
                     SUM(total_expected_amount) OVER (
                         PARTITION BY cohort_month 
-                        ORDER BY days_since_origination
+                        ORDER BY analysis_date 
                         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
                     ) as cumulative_expected_amount,
                     MAX(paid_loans) as paid_loans
                 FROM daily_stats
-                GROUP BY cohort_month, days_since_origination
+                GROUP BY 
+                    cohort_month, 
+                    days_since_origination, 
+                    analysis_date,
+                    total_paid_amount,
+                    total_expected_amount
             )
             SELECT 
                 cohort_month,
