@@ -15,21 +15,18 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Load environment variables
-load_dotenv()
-
-# Create BigQuery client
+# Create BigQuery credentials
 @st.cache_resource
-def get_bigquery_client():
+def get_credentials():
     credentials = service_account.Credentials.from_service_account_info(
         st.secrets["gcp_service_account"]
     )
-    return bigquery.Client(credentials=credentials)
+    return credentials
 
 # Cache data loading functions
 @st.cache_data(ttl="1h")
 def load_loan_performance():
-    client = get_bigquery_client()
+    credentials = get_credentials()
     query = """
     SELECT 
         lp.*,
@@ -39,21 +36,21 @@ def load_loan_performance():
     FROM `gold.fact_loan_performance` lp
     JOIN `gold.dim_borrower` b ON lp.borrower_key = b.borrower_key
     """
-    return pd.read_gbq(query, credentials=client.credentials)
+    return pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
 
 @st.cache_data(ttl="1h")
 def load_portfolio_risk():
-    client = get_bigquery_client()
+    credentials = get_credentials()
     query = """
     SELECT *
     FROM `gold.fact_portfolio_risk`
     ORDER BY snapshot_date
     """
-    return pd.read_gbq(query, credentials=client.credentials)
+    return pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
 
 @st.cache_data(ttl="1h")
 def load_payment_performance():
-    client = get_bigquery_client()
+    credentials = get_credentials()
     query = """
     SELECT 
         pp.*,
@@ -63,7 +60,7 @@ def load_payment_performance():
     FROM `gold.fact_payment_performance` pp
     JOIN `gold.dim_borrower` b ON pp.borrower_key = b.borrower_key
     """
-    return pd.read_gbq(query, credentials=client.credentials)
+    return pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
 
 # Sidebar
 st.sidebar.title("Credix Analytics")
