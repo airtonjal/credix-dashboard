@@ -44,9 +44,32 @@ def load_loan_performance():
 def load_portfolio_risk():
     credentials = get_credentials()
     query = """
-    SELECT *
-    FROM `gold.fact_portfolio_risk`
-    ORDER BY snapshot_date
+    WITH dates AS (
+        SELECT DISTINCT cohort_month as date
+        FROM `gold.fact_portfolio_risk`
+        ORDER BY date
+    ),
+    monthly_stats AS (
+        SELECT 
+            cohort_month as date,
+            default_rate,
+            npl_ratio,
+            avg_max_days_late,
+            avg_installments_over_30d_late,
+            fully_paid_on_time_amount,
+            fully_paid_delayed_amount,
+            overdue_amount,
+            npl_amount,
+            total_portfolio_value
+        FROM `gold.fact_portfolio_risk`
+        WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM `gold.fact_portfolio_risk`)  -- Get latest snapshot
+    )
+    SELECT 
+        d.date,
+        ms.*
+    FROM dates d
+    LEFT JOIN monthly_stats ms ON d.date = ms.date
+    ORDER BY d.date
     """
     return pd.read_gbq(query, credentials=credentials, project_id=credentials.project_id)
 
@@ -55,18 +78,18 @@ def load_payment_performance():
     credentials = get_credentials()
     query = """
     WITH dates AS (
-        SELECT DISTINCT DATE(snapshot_date) as date
+        SELECT DISTINCT DATE(last_due_date) as date
         FROM `gold.fact_payment_performance`
         ORDER BY date
     ),
     daily_stats AS (
         SELECT 
-            DATE(snapshot_date) as date,
+            DATE(last_due_date) as date,
             payment_status,
             COUNT(*) as count,
             SUM(total_original_amount) as total_amount
         FROM `gold.fact_payment_performance`
-        GROUP BY DATE(snapshot_date), payment_status
+        GROUP BY DATE(last_due_date), payment_status
     )
     SELECT 
         d.date,
@@ -180,8 +203,8 @@ try:
         # Load data
         df_risk = load_portfolio_risk()
         
-        # Convert snapshot_date to datetime for proper plotting
-        df_risk['snapshot_date'] = pd.to_datetime(df_risk['snapshot_date'])
+        # Convert date to datetime for proper plotting
+        df_risk['date'] = pd.to_datetime(df_risk['date'])
         
         # Risk Metrics Over Time
         st.subheader("Risk Metrics Trend")
@@ -197,7 +220,7 @@ try:
             for metric in metrics:
                 fig_default.add_trace(
                     go.Scatter(
-                        x=df_risk['snapshot_date'],
+                        x=df_risk['date'],
                         y=df_risk[metric],
                         name=metric.replace('_', ' ').title(),
                         hovertemplate="%{y:.2%}<extra></extra>"
@@ -209,7 +232,11 @@ try:
                 xaxis_title="Date",
                 yaxis_title="Rate",
                 hovermode='x unified',
-                yaxis_tickformat='.2%'  # Format y-axis as percentage
+                yaxis_tickformat='.2%',  # Format y-axis as percentage
+                xaxis=dict(
+                    type='category',  # Force categorical x-axis
+                    tickformat='%Y-%m-%d'  # Format dates as YYYY-MM-DD
+                )
             )
             st.plotly_chart(fig_default, use_container_width=True)
         
@@ -221,7 +248,7 @@ try:
             for metric in metrics:
                 fig_late.add_trace(
                     go.Scatter(
-                        x=df_risk['snapshot_date'],
+                        x=df_risk['date'],
                         y=df_risk[metric],
                         name=metric.replace('_', ' ').title()
                     )
@@ -231,7 +258,11 @@ try:
                 title="Late Payment Metrics Over Time",
                 xaxis_title="Date",
                 yaxis_title="Value",
-                hovermode='x unified'
+                hovermode='x unified',
+                xaxis=dict(
+                    type='category',  # Force categorical x-axis
+                    tickformat='%Y-%m-%d'  # Format dates as YYYY-MM-DD
+                )
             )
             st.plotly_chart(fig_late, use_container_width=True)
         
@@ -256,7 +287,7 @@ try:
         for col, name in categories:
             fig_composition.add_trace(
                 go.Scatter(
-                    x=df_risk['snapshot_date'],
+                    x=df_risk['date'],
                     y=df_risk[col],
                     name=name,
                     stackgroup='one',
@@ -270,7 +301,11 @@ try:
             yaxis_title="Percentage of Portfolio",
             hovermode='x unified',
             yaxis_range=[0, 100],
-            yaxis_ticksuffix='%'
+            yaxis_ticksuffix='%',
+            xaxis=dict(
+                type='category',  # Force categorical x-axis
+                tickformat='%Y-%m-%d'  # Format dates as YYYY-MM-DD
+            )
         )
         st.plotly_chart(fig_composition, use_container_width=True)
         
@@ -281,7 +316,7 @@ try:
         df_risk['cohort_month'] = pd.to_datetime(df_risk['cohort_month'])
         
         cohort_matrix = df_risk.pivot(
-            index='snapshot_date',
+            index='date',
             columns='cohort_month',
             values='default_rate'
         )
