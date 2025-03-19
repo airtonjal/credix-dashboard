@@ -226,7 +226,7 @@ try:
         query = """
         WITH default_metrics AS (
             SELECT
-                due_date as analysis_date,
+                last_due_date as analysis_date,
                 cohort_month,
                 COUNT(DISTINCT asset_id) as total_loans,
                 COUNT(DISTINCT CASE WHEN is_default = 1 THEN asset_id END) as defaulted_loans,
@@ -234,7 +234,7 @@ try:
                 SUM(CASE WHEN is_default = 1 THEN total_expected_amount END) as defaulted_value,
                 AVG(CASE WHEN is_default = 1 THEN max_days_late END) as avg_days_to_default
             FROM `credix-analytics.gold.fact_payment_performance`
-            GROUP BY due_date, cohort_month
+            GROUP BY last_due_date, cohort_month
         )
         SELECT
             analysis_date,
